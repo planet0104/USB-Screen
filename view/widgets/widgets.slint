@@ -1,0 +1,238 @@
+import { ListView, StandardButton, VerticalBox, HorizontalBox, Slider } from "std-widgets.slint";
+import { AButton, AButtonWhite } from "abutton.slint";
+export component Span10px inherits Rectangle {
+    width: 10px;
+    height: 10px;
+}
+
+
+export struct Screen  {
+    name: string,
+    width: length,
+    height: length,
+}
+
+// 组件类型
+export struct WidgetType  {
+    name: string,
+    icon: image,
+    text: string,
+}
+
+// 组件可编辑属性
+export struct WidgetConfig{
+    uuid: string,
+    name: string,
+    x: int,
+    y: int,
+    text: string,
+    text-size: int,
+    prefix: string,
+    rotation: float,
+    width: int,
+    height: int,
+    color_str: string,
+    color: color,
+    image: image,
+}
+
+// 对象列表
+export struct WidgetObject{
+    index: int, //索引
+    uuid: string, //uuid
+    name: string, //名字 (图像/文本
+    type_name: string, // text文本 images图像
+    text: string,
+    prefix: string,
+    tag1: string,
+    tag2: string,
+}
+
+export component ConfirmDialog inherits Rectangle {
+    in-out property <string> title: "温馨提示";
+    in-out property <string> message: "确定要进行此操作吗？";
+    callback on-close(bool);
+    
+    background: #f0f0f0;
+    border-width: 1px;
+    border-color: rgba(0, 0, 0, 60);
+    border-radius: 10px;
+    clip: true;
+
+    VerticalLayout {
+        padding: 1px;
+        Rectangle {
+            background: #f1f3f9;
+            height: 28px;
+            Text { text: title; x: 10px; color:black; horizontal-alignment: left; }
+        }
+        Rectangle {
+            background: white;
+            Text { text: message; min-width: 260px; min-height: 60px; vertical-alignment: center; horizontal-alignment: center; color:black;}
+        }
+        Rectangle { height: 1px; background: #dfdfdf; }
+        HorizontalBox {
+            padding-top: 5px;
+            padding-bottom: 5px;
+            height: 42px;
+            AButtonWhite { text: "确定"; height: 25px; clicked => { on-close(true) } }
+            AButtonWhite { text: "取消"; height: 25px; clicked => { on-close(false) }  }
+        }
+    }
+}
+
+
+export component GradientSlider inherits Rectangle {
+    in-out property<float> maximum: 100;
+    in-out property<float> minimum: 0;
+    in-out property<float> value;
+
+    callback value-changed(float);
+
+    min-height: 100px;
+    min-width: 24px;
+    horizontal-stretch: 0;
+    vertical-stretch: 1;
+
+    border-radius: root.width/2;
+    background: @linear-gradient(180deg, #612efe 0%, black 100%);
+    border-width: 3px;
+    border-color: #bbbbbb;
+
+    handle := Rectangle {
+        width: parent.width;
+        height: 20px;
+        y: (root.height - handle.height) * (root.value - root.minimum)/(root.maximum - root.minimum);
+        Rectangle {
+            width: parent.width+8px;
+            border-width: 7px;
+            border-color: white;
+            Rectangle {
+                width: parent.width - 5px;
+                height: parent.height - 5px;
+                border-width: 3px;
+                border-color: #4c4c4c;
+            }
+        }
+    }
+    touch := TouchArea {
+        property <float> pressed-value;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                self.pressed-value = root.value;
+            }
+        }
+        clicked => {
+            root.value = max(root.minimum, min(root.maximum,
+                (touch.mouse-y - handle.height/2) * (root.maximum - root.minimum) / (root.height - handle.height)));
+            value-changed(root.value);
+        }
+        moved => {
+            if (self.enabled && self.pressed) {
+                root.value = max(root.minimum, min(root.maximum,
+                    self.pressed-value + (touch.mouse-y - touch.pressed-y) * (root.maximum - root.minimum) / (root.height - handle.height)));
+                value-changed(root.value);
+            }
+        }
+    }
+}
+
+export component ColorPicker inherits Rectangle {
+    width: 300px;
+    height: 221px;
+    //背景图片用户取色
+    in-out property <image> background-image: @image-url("../../images/picker.png");
+    //颜色拾取后，设置滚动条背景渐变色
+    in-out property <brush> slider-color <=> slider.background;
+
+    //回调函数，拾取了像素坐标，在代码中获取坐标处颜色
+    callback choose-color(length, length);
+    //回调函数，设置颜色亮度
+    callback choose-brightness(float);
+    callback on-click-close();
+
+    Image {
+        width: 100%;
+        height: 100%;
+        source: background-image;
+    }
+    slider := GradientSlider{
+        y: 14px;
+        x: 260px;
+        width: 30px;
+        height: 132px;
+        border-radius: 1px;
+        value-changed => {
+            choose-brightness(slider.value);
+        }
+    }
+    crosshair := Image {
+        width: 30px;
+        height: 30px;
+        source: @image-url("../../images/crosschair.png");
+    }
+    Rectangle {
+        width: 20px;
+        height: 20px;
+        background: close-touch.pressed? #ccc: close-touch.has-hover? rgb(220, 73, 73) : rgb(255, 73, 73);
+        border-radius: 10px;
+        border-width: 2px;
+        border-color: white;
+        x: root.width - self.width/1.5;
+        y: - self.height/3;
+        Text {
+            color: white;
+            text: "❌";
+            font-size: 8px;
+            y: 7px;
+        }
+        close-touch := TouchArea {
+            clicked => {on-click-close()}
+        }
+    }
+    Rectangle {
+        x: 16px;
+        y: 17px;
+        border-width: 0.4px;
+        width: 229px;
+        height: 126px;
+        touch := TouchArea {
+            clicked => {
+                crosshair.x = touch.mouse-x - crosshair.width/2 + parent.x;
+                crosshair.y = touch.mouse-y - crosshair.height/2 + parent.y;
+                choose-color(parent.x+crosshair.x, parent.y + crosshair.y);
+            }
+            moved => {
+                if(touch.pressed){
+                    crosshair.x = touch.mouse-x - crosshair.width/2 + parent.x;
+                    crosshair.y = touch.mouse-y - crosshair.height/2 + parent.y;
+                    if(crosshair.x < parent.x - crosshair.width/2){
+                        crosshair.x = 0;
+                    }
+                    if(crosshair.y < parent.y - crosshair.height/2){
+                        crosshair.y = 0;
+                    }
+                    if(crosshair.x > parent.width){
+                        crosshair.x = parent.width;
+                    }
+                    if(crosshair.y > parent.height){
+                        crosshair.y = parent.height;
+                    }
+                    choose-color(parent.x+crosshair.x, parent.y + crosshair.y);
+                }
+            }
+        }
+    }
+    Rectangle {
+        x: 16px;
+        y: 160px;
+        border-width: 1px;
+        width: 270px;
+        height: 45px;
+        touch1 := TouchArea {
+            clicked => {
+                choose-color(parent.x+touch1.mouse-x, parent.y + touch1.mouse-y);
+            }
+        }
+    }
+}

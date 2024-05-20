@@ -1,0 +1,32 @@
+{
+    "cSpell.words": [
+        "adcode",
+        "airpressure",
+        "amap",
+        "argb",
+        "blit",
+        "consts",
+        "COUNTERVALUE",
+        "DOENVSUBST",
+        "feelst",
+        "HINSTANCE",
+        "hkey",
+        "HWND",
+        "icomfort",
+        "libloading",
+        "nheight",
+        "NOCLOSEPROCESS",
+        "nwidth",
+        "PCSTR",
+        "psutil",
+        "rcomfort",
+        "runas",
+        "SHELLEXECUTEINFOA",
+        "Uninit",
+        "Vonwaon",
+        "winapi",
+        "winddirection",
+        "windpower"
+    ],
+    "dotnet.preferCSharpExtension": true
+}

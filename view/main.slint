@@ -1,0 +1,514 @@
+import { HorizontalBox , ListView, VerticalBox, ScrollView, StandardListView, LineEdit, ComboBox, Slider, Button, StandardButton} from "std-widgets.slint";
+import { AButton } from "widgets/abutton.slint";
+import { Span10px, Screen, WidgetConfig, WidgetObject, WidgetType, ConfirmDialog, ColorPicker } from "widgets/widgets.slint";
+
+export component CanvasEditor inherits Window{
+    title: "USB屏幕编辑器";
+    icon: @image-url("../images/monitor.png");
+    background: #202124;
+    min-width: 700px;
+    min-height: 500px;
+
+    in-out property <Screen> screen: { name: "ST7735 160x128", width: 160px, height: 128px };
+    in-out property <[string]> screen_names: [
+        "ST7789 160x128"
+    ];
+
+    out property <[WidgetType]> widgets: [
+        {name: "pointer",  icon: @image-url("../images/icon_pointer.png"), text: "指针" },
+        {name: "text", icon: @image-url("../images/icon_text.png"), text: "文本" },
+        {name: "images", icon: @image-url("../images/icon_photo.png"), text: "图像" },
+        {name: "memory", icon: @image-url("../images/icon_ram.png"), text: "内存" },
+        {name: "memory_total", icon: @image-url("../images/icon_ram.png"), text: "总内存" },
+        {name: "memory_percent", icon: @image-url("../images/icon_ram.png"), text: "内存%" },
+        {name: "swap", icon: @image-url("../images/icon_swap.png"), text: "交换区" },
+        {name: "swap_percent", icon: @image-url("../images/icon_swap.png"), text: "交换区%" },
+        {name: "system", icon: @image-url("../images/icon_system.png"), text: "系统" },
+        {name: "kernel", icon: @image-url("../images/icon_version1.png"), text: "内核版本" },
+        {name: "version", icon: @image-url("../images/icon_version2.png"), text: "系统版本" },
+        {name: "host", icon: @image-url("../images/icon_host.png"), text: "主机" },
+        {name: "cpu", icon: @image-url("../images/icon_cpu.png"), text: "CPU" },
+        {name: "cpu_usage", icon: @image-url("../images/icon_percent.png"), text: "CPU使用率" },
+        {name: "cpu_freq", icon: @image-url("../images/icon_clock.png"), text: "CPU频率" },
+        {name: "cpu_temp.", icon: @image-url("../images/icon_temperature.png"), text: "CPU温度" },
+        {name: "cpu_fan", icon: @image-url("../images/icon_fan.png"), text: "CPU风扇" },
+        {name: "num_cpu", icon: @image-url("../images/icon_cpu.png"), text: "CPU核心数" },
+        {name: "gpu_temp.", icon: @image-url("../images/icon_temperature.png"), text: "GPU温度" },
+        {name: "gpu_load", icon: @image-url("../images/icon_percent.png"), text: "GPU使用率" },
+        {name: "gpu_clock", icon: @image-url("../images/icon_clock.png"), text: "GPU频率" },
+        {name: "gpu_fan", icon: @image-url("../images/icon_fan.png"), text: "GPU风扇" },
+        {name: "num_process", icon: @image-url("../images/icon_process.png"), text: "进程数" },
+        {name: "disk_usage", icon: @image-url("../images/icon_drive.png"), text: "磁盘容量" },
+        {name: "disk_read_speed", icon: @image-url("../images/icon_drive.png"), text: "磁盘读" },
+        {name: "disk_write_speed", icon: @image-url("../images/icon_drive.png"), text: "磁盘写" },
+        {name: "received_speed", icon: @image-url("../images/icon_download.png"), text: "下载网速" },
+        {name: "transmitted_speed", icon: @image-url("../images/icon_upload.png"), text: "上传网速" },
+        {name: "local_ip", icon: @image-url("../images/icon_ip.png"), text: "本机IP" },
+        {name: "net_ip", icon: @image-url("../images/icon_ip.png"), text: "外网IP" },
+        {name: "net_ip_info", icon: @image-url("../images/icon_ip.png"), text: "外网地址" },
+        {name: "date", icon: @image-url("../images/icon_date2.png"), text: "日期" },
+        {name: "time", icon: @image-url("../images/icon_time.png"), text: "时间" },
+        {name: "weekday", icon: @image-url("../images/icon_date1.png"), text: "星期" },
+        {name: "lunar_year", icon: @image-url("../images/icon_lunar1.png"), text: "农历年" },
+        {name: "lunar_date", icon: @image-url("../images/icon_lunar2.png"), text: "农历日" },
+        {name: "weather", icon: @image-url("../images/icon_weather.png"), text: "天气" }
+    ];
+
+    in property <[WidgetObject]> object_list: [
+        { type_name: "images", index: 0, uuid: "1", text: "", prefix: "", type_name: "图像" },
+        { type_name: "images", index: 1, uuid: "abc1", text: "", prefix: "", name: "图像" },
+        { type_name: "images", index: 2, uuid: "abc1", text: "", prefix: "",name: "图像" },
+        { type_name: "images", index: 3, uuid: "abc1", text: "", prefix: "",name: "图像" },
+        { type_name: "text", index: 4, uuid: "abc1", text: "", prefix: "",name: "文本文本文本文本文本文本文本文本" },
+    ];
+
+    in-out property <int> widget_type_index: 0;
+    out property <string> widget_type_name: "";
+    out property <string> widget_type_label: "";
+    in-out property <float> screen-scale: 1.4;
+    in property <image> canvas-frame <=> canvas-image.source;
+
+    in-out property <string> active_widget_uuid: "1";
+    in-out property <string> active_widget_x;
+    in-out property <string> active_widget_y;
+    in-out property <string> active_widget_width;
+    in-out property <string> active_widget_height;
+    in-out property <string> active_widget_prefix;
+    in-out property <string> active_widget_text;
+    in-out property <string> active_widget_font_size;
+    in-out property <string> active_widget_rotation;
+    in-out property <color> active_widget_color;
+    in-out property <string> active_widget_color_str;
+    in-out property <string> active_widget_tag1;
+    in-out property <string> active_widget_tag2;
+    in-out property <image> active_widget_image;
+    in-out property <string> active_widget_image_color_str;
+    in-out property <string> active_widget_type_name: "";
+    in-out property <string> font-name: "凤凰点阵";
+
+    callback change_screen(int);
+    callback save_screen();
+    callback open_screen();
+    callback open_font();
+    callback mouse-move(length, length, length, length, bool);
+    callback mouse-click(length, length, length, length);
+    callback update-widget-position();
+    callback update-widget-text();
+    callback update-widget-tags();
+    callback update-widget-image();
+    callback update-widget-image-color();
+    callback new-image-ready();
+    callback select_widget(string);
+    callback delete_widget(string);
+    callback move_up_widget(string);
+    callback move_down_widget(string);
+    callback screen_mouse_scroll(length, length);
+    callback screen_key_event(KeyEvent);
+
+    property <length> color-picker-x: 10px;
+    property <length> color-picker-y: 10px;
+    in-out property <brush> picker-color;
+    in-out property <float> picker-brightness;
+    //回调函数，拾取了像素坐标，在代码中获取坐标处颜色
+    callback color-picker-choose-color(length, length) -> brush;
+    //回调函数，设置颜色亮度
+    callback color-picker-brightness-change();
+
+    //更新list-view的滚动位置
+    public function update-list-view-scroll(total: int, select-index: int){
+        if(list-view.viewport-height > total * 28px){
+            return;
+        }
+        //列表项高度固定28px
+        list-view.viewport-y = - select-index * 28px;
+    }
+
+    color-picker := PopupWindow {
+        x: color-picker-x;
+        y: color-picker-y;
+        width: picker.width;
+        height: picker.height;
+        close-on-click: false;
+        picker := ColorPicker {
+            on-click-close => {
+                color-picker.close();
+            }
+            choose-brightness(val) => {
+                picker-brightness = val;
+                color-picker-brightness-change();
+            }
+            choose-color(x, y) => {
+                picker-color = color-picker-choose-color(x, y);
+                picker.slider-color = @linear-gradient(180deg, picker-color 0%, black 100%);
+            }
+        }
+    }
+
+    container := HorizontalLayout {
+        Rectangle {
+            width: 120px;
+            background: #2d2e31;
+            VerticalLayout {
+                // Text {
+                //     vertical-alignment: center;
+                //     height: 24px;
+                //     text: "组件类型";
+                // }
+                ListView {
+                    for data[widget-idx] in widgets: 
+                    Rectangle {
+                        opacity: widget_type_index == widget-idx? 1 : 0.8;
+                        border-radius: 5px;
+                        // background: widget_type_index == widget-idx? rgba(255, 255, 255, 0.13) :
+                        //      (touch.has-hover? rgba(255, 255, 255, 0.07):transparent );
+                        touch := TouchArea {
+                            clicked => {
+                                widget_type_index = widget-idx;
+                                widget_type_name = widgets[widget-idx].name;
+                                widget_type_label = widgets[widget-idx].text;
+                            }
+                        }
+                    
+                        HorizontalLayout {
+                            padding: 8px;
+                            VerticalLayout {
+                                height: 100%;
+                                alignment: center;
+                                Image {
+                                    width: widget_type_index == widget-idx? 18px : 15px;
+                                    height: widget_type_index == widget-idx? 18px : 15px;
+                                    image-fit: contain;
+                                    source: data.icon;
+                                }
+                            }
+                            VerticalLayout {
+                                padding-top: -2px;
+                                Text {
+                                    font-weight: widget_type_index == widget-idx? 8000 : 300;
+                                    font-size: widget_type_index == widget-idx? 14px : 13px;
+                                    vertical-alignment: center;
+                                    text: (widget_type_index == widget-idx?" ":"  ")+data.text;
+                                    color: widget_type_index == widget-idx? #22b5fe : white;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            Rectangle {
+                VerticalLayout {
+                    padding: 16px;
+                    Rectangle {
+                        HorizontalLayout {
+                            Text {
+                                width: 35px;
+                                vertical-alignment: center;
+                                height: 24px;
+                                text: "屏幕";
+                            }
+                            ComboBox {
+                                height: self.preferred-height*1.8;
+                                model: screen_names;
+                                current-value: screen.name;
+                                selected(name) => {
+                                    change_screen(self.current-index);
+                                }
+                            }
+                            Span10px {}
+                            AButton {height: 26px; width: 95px; icon-opacity: 0.8; text-color: #bbf; icon-colorize: #bbf; use-icon: true; icon: @image-url("../images/icon_font.png"); border-color: #444; text: font-name; clicked => { open_font() } }
+                            Span10px {}
+                            AButton { width: 40px; text: "打开"; clicked => { open_screen() } }
+                            Span10px {}
+                            AButton { width: 40px; text: "保存"; clicked => { save_screen() } }
+                        }
+                    }
+                    Rectangle {
+                        canvas-focus := FocusScope {
+                            width: (slider.value/100) * parent.width;
+                            height: self.width * (screen.height/screen.width);
+                            key-pressed(event) => {
+                                screen_key_event(event);
+                                accept
+                            }
+                        }
+                        canvas-touch := TouchArea {
+                            width: (slider.value/100) * parent.width;
+                            height: self.width * (screen.height/screen.width);
+                            moved => {
+                                mouse-move(canvas-touch.mouse-x/(self.width/screen.width), canvas-touch.mouse-y/(self.width/screen.width), screen.width, screen.height, canvas-touch.pressed)
+                            }
+                            clicked => {
+                                canvas-focus.focus();
+                                mouse-click(canvas-touch.mouse-x/(self.width/screen.width), canvas-touch.mouse-y/(self.width/screen.width), screen.width, screen.height)
+                            }
+                            scroll-event(e) => {
+                                screen_mouse_scroll(e.delta-x, e.delta-y);
+                                accept
+                            }
+                        }
+                        Rectangle {
+                            background: #181818;
+                            width: (slider.value/100) * parent.width;
+                            height: self.width * (screen.height/screen.width);
+                            border-radius: 6px;
+                            canvas-image := Image {
+                                width: 100%;
+                                height: 100%;
+                            }
+                        }
+                    }
+                    Rectangle {
+                        height: 20px;
+                        slider := Slider {
+                            y: 10px;
+                            width: parent.width;
+                            height: parent.height;
+                            value: 80;
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            width: 260px;
+            Rectangle {
+                border-radius: 4px;
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 10px;
+                    padding-bottom: 10px;
+                    Rectangle {
+                        background: #2d2e31;
+                        border-radius: 6px;
+                        TouchArea {
+                            scroll-event(ev) => {
+                                accept
+                            }
+                        }
+                        VerticalBox {
+                            padding-left: 0px;
+                            padding-right: 5px;
+                            list-view := ListView {
+                                for item in object_list : 
+                                Rectangle{
+                                    height: 28px;
+                                    if item.uuid != active_widget_uuid : TouchArea {
+                                        width: 100%;
+                                        height: 100%;
+                                        clicked => { select_widget(item.uuid) }
+                                    }
+                                    HorizontalBox {
+                                        padding-top: 6px;
+                                        padding-bottom: 6px;
+                                        width: parent.width;
+                                        Text {
+                                            color: item.uuid == active_widget_uuid? #1989fa: white;
+                                            height: 16px;
+                                            width: 12px;
+                                            text: ""+item.index+"";
+                                        }
+                                        if item.type_name == "images" : Image{
+                                            source:  item.uuid == active_widget_uuid? @image-url("../images/icon_photo_blue.png"): @image-url("../images/icon_photo.png");
+                                            width: 14px;
+                                            height: 14px;
+                                        }
+                                        if item.type_name == "text" : Image{
+                                            source:  item.uuid == active_widget_uuid? @image-url("../images/icon_text_blue.png"): @image-url("../images/icon_text.png");
+                                            width: 14px;
+                                            height: 14px;
+                                        }
+                                        Text {
+                                            color: item.uuid == active_widget_uuid? #1989fa: white;
+                                            height: 16px;
+                                            text: item.name == "文本"? item.prefix+item.text: item.name;
+                                        }
+                                        if item.uuid == active_widget_uuid : 
+                                            HorizontalLayout{
+                                                spacing: 4px;
+                                                AButton { enabled: item.index != 0; width: 30px; height: 20px; text: "上移"; clicked => { move_up_widget(item.uuid) } }
+                                                AButton { enabled: item.index+1 < object_list.length; width: 30px; height: 20px; text: "下移"; clicked => { move_down_widget(item.uuid) } }
+                                                AButton { width: 30px; height: 20px; text: "删除"; clicked => { delete_widget(item.uuid) } }
+                                            }
+                                    }
+                                    if item.index != 0 : VerticalLayout {
+                                        Rectangle { height: 1px; background: #3a3a3c;}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if active_widget_uuid != "" : Rectangle { height: 15px; }
+                    if active_widget_uuid != "" : Rectangle {
+                        background: #2d2e31;
+                        border-radius: 6px;
+                        VerticalBox {
+                            padding-top: 0px;
+                            HorizontalBox { height: 15px;}
+                            // HorizontalBox{
+                            //     padding-bottom: 0px;
+                            //     Text { text: "ID:"+active_widget_uuid; }
+                            // }
+                            HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "坐标:"; width: 40px; }
+                                LineEdit { width: 40px; height: 20px; text <=> active_widget_x; input-type: number; edited => { update-widget-position(); } }
+                                Text { text: ","; width: 8px; }
+                                LineEdit { width: 40px; height: 20px; text <=> active_widget_y; input-type: number; edited => { update-widget-position() } }
+                            }
+                            if active_widget_type_name == "images" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "大小:"; width: 40px; }
+                                LineEdit { width: 60px; height: 20px; text <=> active_widget_width; input-type: number; edited => { update-widget-position() }}
+                                Text { text: "x"; width: 8px; }
+                                LineEdit { width: 60px; height: 20px; text <=> active_widget_height; input-type: number; edited => { update-widget-position() } }
+                            }
+                            if active_widget_type_name == "images" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "旋转:"; width: 40px; }
+                                LineEdit { width: 30px; height: 20px; text <=> active_widget_rotation; input-type: number; edited => { update-widget-position() } }
+                            }
+                            if active_widget_type_name != "images" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "标签:"; width: 40px; }
+                                LineEdit { height: 20px; text <=> active_widget_prefix; input-type: text; edited => { update-widget-text() } }
+                            }
+                            if active_widget_type_name != "images" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "文本:"; width: 40px; }
+                                LineEdit { height: 20px; text <=> active_widget_text; input-type: text; edited => { update-widget-text() } }
+                            }
+                            if active_widget_type_name != "images" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "字号:"; width: 40px; }
+                                LineEdit { width: 30px; height: 20px; text <=> active_widget_font_size; input-type: text; edited => { update-widget-text() } }
+                            }
+                            if active_widget_type_name != "images" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "颜色:"; width: 40px; }
+                                LineEdit { width: 80px; height: 20px; text <=> active_widget_color-str; input-type: text; edited => { update-widget-text() } }
+                                Rectangle { width: 5px; }
+                                color-rect := Rectangle {
+                                    background: active_widget_color;
+                                    border-color:  color-rect-touch.pressed?#999: color-rect-touch.has-hover?#bbb:#555555;
+                                    border-width: 1px;
+                                    border-radius: 1px;
+                                    height: 18px;
+                                    width: 18px;
+                                    color-rect-touch := TouchArea {
+                                        clicked => {
+                                            color-picker-x = color-rect.absolute-position.x - 310px;
+                                            color-picker-y = color-rect.absolute-position.y - 230px;
+                                            color-picker.show();
+                                        }
+                                    }
+                                }
+                            }
+                            //带有百分比的控件，tag1="1"代表进度条，其他代表普通文本，tag2代表进度条宽度(字体代表进度条高度)
+                            if active_widget_type_name == "memory_percent"
+                                || active_widget_type_name == "swap_percent"
+                                || active_widget_type_name == "cpu_usage"
+                                || active_widget_type_name == "disk_usage"
+                                || active_widget_type_name == "gpu_load"
+                                || active_widget_type_name == "cpu_temp."
+                                || active_widget_type_name == "gpu_temp."
+                               : VerticalLayout{
+                                    HorizontalBox {
+                                        padding-top: 5px;
+                                        padding-bottom: 0px;
+                                        Text { text: "显示:"; width: 40px; }
+                                        ComboBox {
+                                            width: self.preferred-width*1.4;
+                                            height: self.preferred-height*1.5;
+                                            model: ["文字", "进度条"];
+                                            current-value: "文字";
+                                            selected => {
+                                                active_widget_tag1 = self.current-index;
+                                                update-widget-tags()
+                                            }
+                                        }
+                                    }
+                                    HorizontalBox {
+                                        padding-top: 5px;
+                                        padding-bottom: 0px;
+                                        Text { text: "宽度:"; width: 40px; }
+                                        LineEdit { width: 50px; height: 20px; text <=> active_widget_tag2; input-type: text; edited => { update-widget-tags() } }
+                                    }
+                            }
+
+                            //天气控件 tag1代表显示类型, tag2代表城市名称
+                            if active_widget_type_name == "weather" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "显示:"; width: 40px; }
+                                ComboBox {
+                                    width: self.preferred-width*1.2;
+                                    height: self.preferred-height*1.5;
+                                    model: ["天气", "城市", "气温", "风向", "风力", "风级", "图标"];
+                                    current-value: "天气";
+                                    selected => {
+                                        active_widget_tag1 = self.current-index;
+                                        update-widget-tags()
+                                    }
+                                }
+                            }
+                            if active_widget_type_name == "weather" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "城市:"; width: 40px; }
+                                text-tag1:=  LineEdit {
+                                    width: 120px; height: 20px; placeholder-text: "输入名字搜索"; text <=> active_widget_tag2; input-type: text;
+                                }
+                                AButton { width: 34px; height: 24px; text: "确定"; clicked => { update-widget-tags() } }
+                            }
+                            if active_widget_type_name == "images" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "颜色:"; width: 40px; }
+                                LineEdit { width: 80px; height: 20px; text <=> active_widget_image_color_str; input-type: text; edited => { update-widget-image-color() } }
+                                Rectangle { width: 5px; }
+                                color-rect1 := Rectangle {
+                                    background: active_widget_color;
+                                    border-color:  color-rect-touch1.pressed?#999: color-rect-touch1.has-hover?#bbb:#555555;
+                                    border-width: 1px;
+                                    border-radius: 1px;
+                                    height: 18px;
+                                    width: 18px;
+                                    color-rect-touch1 := TouchArea {
+                                        clicked => {
+                                            color-picker-x = color-rect1.absolute-position.x - 310px;
+                                            color-picker-y = color-rect1.absolute-position.y - 230px;
+                                            color-picker.show();
+                                        }
+                                    }
+                                }
+                            }
+                            if active_widget_type_name == "images" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "图片:"; width: 40px; }
+                                Rectangle {
+                                    width: 40px; height: 40px;
+                                    background: #444;
+                                    border-radius: 5px;
+                                    Image { source: active_widget_image; width: 100%; height: 100%; }
+                                }
+                                Rectangle { width: 5px; }
+                                AButton { text: "修改..."; width:65px; height: 26px; clicked => { update-widget-image() } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

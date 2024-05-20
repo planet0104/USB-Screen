@@ -1,0 +1,53 @@
+[package]
+name = "USB-Screen"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+slint = "1.6"
+anyhow = "1"
+sysinfo = "0.30.12"
+chrono = "0.4.38"
+rust-ephemeris = "0.1.0"
+chinese-number = "0.7.7"
+precord-core = "0.7.11"
+serde_json = "1.0"
+once_cell = "1.19.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+offscreen-canvas = { git = "https://github.com/planet0104/offscreen-canvas", tag = "0.1.9"}
+bincode = "2.0.0-rc.3"
+lz4_flex = "0.11.3"
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1.8", features = [ "v4" ]}
+image = "0.25.1"
+hex_color = "3.0.0"
+rfd = "0.14.1"
+gif = "0.13.1"
+gif-dispose = "5.0.0"
+env_logger = "0.11.3"
+log = "0.4.21"
+num_cpus = "1"
+ttf-parser = "0.21.1"
+local-ip-address = "0.6.1"
+nusb = "0.1.8"
+futures-lite = "2.3.0"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.54", features = [ "Win32_System_Performance", "Win32_System_Threading", "Win32_Security", "Win32_UI_Shell", "Win32_System_Registry" ]}
+tiny_http = "0.12"
+
+[target.'cfg(not(windows))'.dependencies]
+psutil = "3.3.0"
+
+[build-dependencies]
+slint-build = "1.6"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1.12"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
