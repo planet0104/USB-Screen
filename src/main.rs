@@ -76,10 +76,10 @@ fn open_usb_screen(mut render: ScreenRender) -> Result<()> {
 }
 
 fn read_screen_file() -> Option<String> {
-    #[cfg(debug_assertions)]
-    {
-        return None;
-    }
+    // #[cfg(debug_assertions)]
+    // {
+    //     return None;
+    // }
     //在当前目录下查找.screen文件
     let path = Path::new("./"); // 这里以当前目录为例，你可以替换为任何你想要列出的目录路径
                                 // 使用read_dir函数读取目录条目

@@ -274,10 +274,7 @@ impl Widget for TextWidget {
                 .unwrap_or(self.font_size as i32 * 5);
             let mut rect_width = (width as f32 * (percent / 100.)) as i32;
             if rect_width <= 0 {
-                rect_width = self.font_size as i32 * 5;
-            }
-            if rect_width == 0 {
-                rect_width = 10;
+                rect_width = 1;
             }
             //字体作为高度
             if self.font_size <= 2. {
