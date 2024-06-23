@@ -1,12 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{path::Path, time::Duration};
+use std::{path::Path, time::{Duration, Instant}};
 
 use anyhow::Result;
+use human_repr::HumanDuration;
 use image::{buffer::ConvertBuffer, RgbImage};
 use log::info;
-use rgb565::rgb888_to_rgb565_u16;
-use usb_screen::draw_rgb565;
+use tao::event_loop::ControlFlow;
+use usb_screen::find_and_open_a_screen;
 
 use crate::screen::ScreenRender;
 mod editor;
@@ -25,19 +26,20 @@ fn main() -> Result<()> {
         .try_init();
     info!("editor start!");
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(not(debug_assertions))]
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
 
-    let screen_file = match args.len() {
-        0 => read_screen_file(),
-        1 => Some(args[0].to_string()),
-        _ => None,
-    };
+        let screen_file = match args.len() {
+            0 => read_screen_file(),
+            1 => Some(args[0].to_string()),
+            _ => None,
+        };
 
-    if let Some(file) = screen_file {
-        let f = std::fs::read(file)?;
-        let render = ScreenRender::new_from_file(&f)?;
-        open_usb_screen(render)?;
-        return Ok(());
+        if let Some(file) = screen_file {
+            create_tray_icon(file)?;
+            return Ok(());
+        }
     }
 
     editor::run()?;
@@ -45,34 +47,102 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn open_usb_screen(mut render: ScreenRender) -> Result<()> {
+fn open_usb_screen(file: String) -> Result<()>{
+    let f = std::fs::read(file)?;
+    let mut render = ScreenRender::new_from_file(&f)?;
+
     render.setup_monitor()?;
-    let mut usb_screen = usb_screen::open_usb_screen("USB Screen", "62985215")?;
+    let mut usb_screen = usb_screen::find_and_open_a_screen();
+    let mut last_draw_time = Instant::now();
+    let frame_duration = 1000/render.fps as u128;
+
     loop {
+        if last_draw_time.elapsed().as_millis() < frame_duration{
+            std::thread::sleep(Duration::from_millis(5));
+            continue;
+        }
+        last_draw_time = Instant::now();
         render.render();
         let frame: RgbImage = render.canvas.image_data().convert();
-        let rgb565 = rgb888_to_rgb565_u16(&frame, frame.width() as usize, frame.height() as usize);
+        // let rgb565 = rgb888_to_rgb565_u16(&frame, frame.width() as usize, frame.height() as usize);
         if usb_screen.is_none() {
             std::thread::sleep(Duration::from_millis(2000));
             println!("open USB Screen...");
-            usb_screen = usb_screen::open_usb_screen("USB Screen", "62985215")?;
+            usb_screen = find_and_open_a_screen();
         } else {
-            let interface = usb_screen.as_mut().unwrap();
-            if draw_rgb565(
-                &rgb565,
+            let screen = usb_screen.as_mut().unwrap();
+            if screen.draw_rgb_image(
                 0,
                 0,
-                frame.width() as u16,
-                frame.height() as u16,
-                interface,
+                &frame
             )
             .is_err()
             {
                 usb_screen = None;
             }
         }
-        std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn create_tray_icon(file: String) -> Result<()> {
+    std::thread::spawn(move ||{
+        let _ = open_usb_screen(file);
+    });
+
+    // 图表必须运行在UI线程上
+    let event_loop = tao::event_loop::EventLoopBuilder::new().build();
+
+    let tray_menu = Box::new(tray_icon::menu::Menu::new());
+    let quit_i = tray_icon::menu::MenuItem::new("退出", true, None);
+    let _ = tray_menu.append(&quit_i);
+    let mut tray_icon = None;
+    let mut menu_channel = None;
+
+    event_loop.run(move |event, _, control_flow| {
+        // We add delay of 16 ms (60fps) to event_loop to reduce cpu load.
+        // This can be removed to allow ControlFlow::Poll to poll on each cpu cycle
+        // Alternatively, you can set ControlFlow::Wait or use TrayIconEvent::set_event_handler,
+        // see https://github.com/tauri-apps/tray-icon/issues/83#issuecomment-1697773065
+        *control_flow = ControlFlow::WaitUntil(
+            std::time::Instant::now() + std::time::Duration::from_millis(16),
+        );
+
+        if let tao::event::Event::NewEvents(tao::event::StartCause::Init) = event {
+            //创建图标
+            let icon = image::load_from_memory(include_bytes!("../images/monitor.png")).unwrap().to_rgba8();
+            let (width, height) = icon.dimensions();
+            
+            
+            if let Ok(icon) = tray_icon::Icon::from_rgba(icon.into_raw(), width, height){
+                if let Ok(i) = tray_icon::TrayIconBuilder::new()
+                .with_tooltip("USB Screen")
+                .with_menu(tray_menu.clone())
+                .with_icon(icon)
+                .build(){
+                    tray_icon = Some(i);
+                    menu_channel = Some(tray_icon::menu::MenuEvent::receiver());
+                }
+            }
+
+            // We have to request a redraw here to have the icon actually show up.
+            // Tao only exposes a redraw method on the Window so we use core-foundation directly.
+            #[cfg(target_os = "macos")]
+            unsafe {
+                use core_foundation::runloop::{CFRunLoopGetMain, CFRunLoopWakeUp};
+
+                let rl = CFRunLoopGetMain();
+                CFRunLoopWakeUp(rl);
+            }
+        }
+
+        if let (Some(_tray_icon), Some(menu_channel)) = (tray_icon.as_mut(), menu_channel.as_mut()){
+            if let Ok(event) = menu_channel.try_recv() {
+                if event.id == quit_i.id() {
+                    *control_flow = ControlFlow::Exit;
+                }
+            }
+        }
+    });
 }
 
 fn read_screen_file() -> Option<String> {

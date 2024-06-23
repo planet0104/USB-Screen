@@ -37,6 +37,44 @@ export component AButton inherits Rectangle {
     }
 }
 
+export component SmallButton inherits Rectangle {
+    border-color: self.enabled? #ccc : focus.has-focus?white: #9b9b9b;
+    border-radius: 2px;
+    border-width: 1px;
+    background: touch.pressed?#666 : touch.has-hover? #454545 : #333;
+    in-out property <image> icon;
+    in-out property <length> icon-size: 0px;
+    in-out property <float> icon-opacity: 1.0;
+    in-out property <color> icon-colorize: white;
+    in-out property <bool> use-icon;
+    in-out property <string> text <=> text.text;
+    in-out property <color> text-color: white;
+    in-out property <bool> enabled: true;
+    callback clicked();
+    if use-icon : image := Image{
+        x: 5px;
+        colorize: icon-colorize;
+        opacity: icon-opacity;
+        width: icon-size == 0? 12px : icon-size;
+        source: icon;
+    }
+    text := Text {
+        x: use-icon ? ( icon-size==0? 20px : icon-size+8px ) : root.width/2-self.width/2;
+        color: text-color;
+        font-size: 10px;
+        text: "Button";
+    }
+    focus := FocusScope {
+        touch := TouchArea {
+            clicked => { 
+                if(enabled){
+                    clicked();
+                }
+            }
+        }
+    }
+}
+
 export component AButtonWhite inherits AButton {
     //默认背景fdfdfd 边框 d0d0d0
     //鼠标指向e0eef9 边框 0078d4

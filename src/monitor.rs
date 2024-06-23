@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use chinese_number::{ChineseCase, ChineseCountMethod, ChineseVariant, NumberToChinese};
 use chrono::{Datelike, Local};
+use human_repr::HumanDuration;
 use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use rust_ephemeris::lunnar::SolorDate;
@@ -23,6 +24,13 @@ pub const EMPTY_STRING: &str = "N/A";
 #[cfg(windows)]
 const OHMS_EXE_FILE: &[u8] =
     include_bytes!("../OpenHardwareMonitorService/bin/Release/OpenHardwareMonitorService.exe");
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SystemUptime {
+    pub hours: u32,
+    pub minutes: u32,
+    pub seconds: u32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetIpInfo {
@@ -758,6 +766,24 @@ pub fn lunar_date() -> String {
         Err(_err) => format!("{}", x.2),
     };
     format!("{month}{day}")
+}
+
+pub fn system_uptime() -> SystemUptime{
+    let duration = Duration::from_secs(sysinfo::System::uptime()).human_duration();
+    let duration = format!("{duration}");
+    let arr:Vec<&str> = duration.split(":").collect();
+    let mut uptime = SystemUptime::default();
+    if arr.len() > 2{
+        uptime.hours = arr[0].parse().unwrap_or(0);
+        uptime.minutes = arr[1].parse().unwrap_or(0);
+        uptime.seconds = arr[2].parse().unwrap_or(0);
+    }else if arr.len() > 1{
+        uptime.minutes = arr[0].parse().unwrap_or(0);
+        uptime.seconds = arr[1].parse().unwrap_or(0);
+    }else if arr.len() > 0{
+        uptime.seconds = arr[0].parse().unwrap_or(0);
+    }
+    uptime
 }
 
 pub fn net_ip_address() -> Option<String> {

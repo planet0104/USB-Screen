@@ -1,6 +1,6 @@
 [package]
 name = "USB-Screen"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 
 [dependencies]
@@ -31,6 +31,10 @@ ttf-parser = "0.21.1"
 local-ip-address = "0.6.1"
 nusb = "0.1.8"
 futures-lite = "2.3.0"
+serialport = "4.3.0"
+tray-icon = "0.14.3"
+tao = "0.28.1"
+human-repr = "1.1.0"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.54", features = [ "Win32_System_Performance", "Win32_System_Threading", "Win32_Security", "Win32_UI_Shell", "Win32_System_Registry" ]}

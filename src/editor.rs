@@ -1,5 +1,6 @@
 use anyhow::Result;
 use hex_color::HexColor;
+use image::buffer::ConvertBuffer;
 use image::{imageops::resize, RgbImage};
 use log::{error, info};
 use offscreen_canvas::{OffscreenCanvas, BLUE, WHITE};
@@ -8,6 +9,8 @@ use slint::private_unstable_api::re_exports::KeyEvent;
 use slint::{
     Brush, Color, Image, Model, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel, Weak,
 };
+use std::time::Instant;
+use once_cell::sync::Lazy;
 use std::{
     cell::RefCell,
     fs::File,
@@ -17,12 +20,24 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::usb_screen::{self, UsbScreen, UsbScreenInfo};
 use crate::{
     nmc::CITIES,
     screen::{ScreenRender, ScreenSize, DEFAULT_FONT},
     utils::get_font_name,
     widgets::{ImageData, ImageWidget, TextWidget, Widget},
 };
+
+struct CurrentUsbScreen{
+    info: UsbScreenInfo,
+    screen: UsbScreen
+}
+
+// 当前打开的屏幕
+static SCREEN: Lazy<Mutex<Option<CurrentUsbScreen>>> = Lazy::new(|| {
+    Mutex::new(None)
+});
+
 
 slint::include_modules!();
 
@@ -37,6 +52,9 @@ struct CanvasEditorContext {
     start_drag_dx: i32,
     start_drag_dy: i32,
     picker_img: RgbImage,
+    fps: i32,
+    last_frame_time: Option<Instant>,
+    devices: Vec<UsbScreenInfo>
 }
 
 impl CanvasEditorContext {
@@ -55,6 +73,11 @@ impl CanvasEditorContext {
             name: "ST7735".into(),
             width: 160,
             height: 128,
+        },
+        ScreenSize {
+            name: "ST7789".into(),
+            width: 320,
+            height: 240,
         }];
 
         let screen_names = Rc::new(VecModel::from(
@@ -65,15 +88,13 @@ impl CanvasEditorContext {
         ));
 
         win.set_screen_names(screen_names.into());
-        win.set_screen(Screen {
-            name: format!(
-                "{ } {}x{}",
-                screens[0].name, screens[0].width, screens[0].height
-            )
-            .into(),
-            width: screens[0].width as f32,
-            height: screens[0].height as f32,
-        });
+        win.set_screen_name(format!(
+            "{ } {}x{}",
+            screens[0].name, screens[0].width, screens[0].height
+        )
+        .into());
+        win.set_screen_width(screens[0].width as f32);
+        win.set_screen_height(screens[0].height as f32);
 
         CanvasEditorContext {
             app,
@@ -93,6 +114,9 @@ impl CanvasEditorContext {
             list_model,
             screens,
             picker_img,
+            fps: 10,
+            last_frame_time: None,
+            devices: vec![],
         }
     }
 
@@ -101,6 +125,58 @@ impl CanvasEditorContext {
         match &active_id {
             Some(uuid) => Some(self.screen.find_widget(uuid)?.1),
             None => None,
+        }
+    }
+
+    pub fn update_device_list(&mut self){
+        self.devices = usb_screen::find_all_device();
+        let device_list = Rc::new(VecModel::from(
+            self.devices
+                .iter()
+                .map(|dev| format!("{}", dev.label).into())
+                .collect::<Vec<SharedString>>(),
+        ));
+        if self.devices.len() == 0{
+            device_list.push("未找到".into());
+        }
+        let app = self.app.unwrap();
+        app.set_device_list(device_list.into());
+        let mut dev_index:i32 = -1;
+        let current_name = app.get_device_name().to_string();
+        for (idx, dev) in self.devices.iter().enumerate(){
+            if dev.label == current_name{
+                dev_index = idx as i32;
+                break;
+            }
+        }
+
+        if dev_index == -1 && self.devices.len()>0{
+            app.set_device_name(self.devices[0].label.clone().into());
+        }
+
+        if self.devices.len() == 0{
+            app.set_device_name("未找到".into());
+        }
+
+        //连接当前设备
+        if dev_index >= 0{
+            let dev = self.devices[dev_index as usize].clone();
+            std::thread::spawn(move ||{
+                if let Ok(mut screen) = SCREEN.lock(){
+                    if screen.is_some() && screen.as_ref().unwrap().info.label == dev.label{
+                        return;
+                    }
+    
+                    match UsbScreen::open(dev.clone()){
+                        Ok(s) => {
+                            screen.replace(CurrentUsbScreen { info: dev.clone(), screen: s });
+                        }
+                        Err(err) => {
+                            println!("屏幕打开失败:{:?}", err);
+                        }
+                    }
+                }
+            });
         }
     }
 
@@ -120,7 +196,7 @@ impl CanvasEditorContext {
 
                     //进度条按照tag2为宽度
                     if let Some(widget) = widget.as_any_mut().downcast_mut::<TextWidget>() {
-                        if widget.type_name != "weather" && widget.tag1 == "1" {
+                        if widget.type_name != "weather" && widget.type_name != "uptime" && widget.tag1 == "1" {
                             let width = widget
                                 .tag2
                                 .parse::<i32>()
@@ -165,6 +241,24 @@ impl CanvasEditorContext {
         self.app
             .unwrap()
             .set_canvas_frame(slint::Image::from_rgba8(buf));
+
+        if let Some(last_frame_time) = self.last_frame_time.as_ref(){
+            if (last_frame_time.elapsed().as_millis() as i32) < 1000/self.fps{
+                return;
+            }
+        }
+
+        //发送到USB屏幕
+        let frame: RgbImage = self.screen.canvas.image_data().convert();
+        std::thread::spawn(move ||{
+            if let Ok(mut screen) = SCREEN.lock(){
+                if let Some(device) = screen.as_mut(){
+                    let _ = device.screen.draw_rgb_image(0,0,&frame);
+                }
+            }
+        });
+        //更新最后时间
+        self.last_frame_time = Some(Instant::now());
     }
 
     fn on_mouse_click(&mut self, mouse_x: f32, mouse_y: f32, image_width: f32, image_height: f32) {
@@ -856,22 +950,90 @@ impl CanvasEditorContext {
 
     fn on_change_screen(&mut self, index: i32) {
         let screen = &self.screens[index as usize];
-        info!("on_change_screen: {:?}", screen);
+        
+        let width_scale = screen.width as f32 / self.screen.width as f32;
+        let height_scale = screen.height as f32 / self.screen.height as f32;
+
+        info!("on_change_screen: {screen:?} width_scale={width_scale} height_scale={height_scale}");
+
         self.screen.width = screen.width;
         self.screen.height = screen.height;
+        
+        //修改画布大小
         self.screen.canvas = OffscreenCanvas::new(
             screen.width,
             screen.height,
             self.screen.canvas.font().clone(),
         );
-        self.app.unwrap().set_screen(Screen {
-            name: screen.name.clone().into(),
-            width: screen.width as f32,
-            height: screen.height as f32,
-        });
+
+        //修改元素大小
+        for idx in 0..self.screen.widgets.len() {
+            if self.screen.widgets[idx].type_name() != "images" {
+                if let Some(widget) = self.screen.widgets[idx]
+                    .as_any_mut()
+                    .downcast_mut::<TextWidget>()
+                {
+                    //重新设置进度条设置宽度
+                    if widget.type_name != "weather" && widget.type_name != "uptime" && widget.tag1 == "1"{
+                        let tag2 = widget.tag2.clone();
+                        let width = tag2.parse::<f32>().unwrap_or(widget.font_size * 5.);
+                        widget.tag2 = format!("{}", (width_scale * width) as i32);
+                        let new_left = widget.position().left as f32 * width_scale;
+                        let new_top = widget.position().top as f32 * height_scale;
+                        widget.position_mut().set_position(new_left as i32, new_top as i32);
+                        widget.font_size = height_scale * widget.font_size as f32;
+                    }else{
+                        let pos = widget.position_mut();
+                        let (x, y) = pos.center();
+                        pos.set_center((x as f32 * width_scale) as i32, (y as f32 * height_scale) as i32);
+                        widget.font_size = height_scale * widget.font_size as f32;
+                    }
+                }
+            }
+            if self.screen.widgets[idx].type_name() == "images" {
+                if let Some(widget) = self.screen.widgets[idx]
+                    .as_any_mut()
+                    .downcast_mut::<ImageWidget>()
+                {
+                    let pos = widget.position_mut();
+                    let (x, y) = pos.center();
+                    let new_width = pos.width() as f32 * width_scale;
+                    let new_height = pos.height() as f32 * height_scale;
+                    let dw = (new_width - pos.width() as f32) /2.;
+                    let dh = (new_height - pos.height() as f32) /2.;
+                    pos.inflate(dw as i32, dh as i32);
+                    pos.set_center((x as f32 * width_scale) as i32, (y as f32 * height_scale) as i32);
+                }
+            }
+        }
+
+        let app = self.app.unwrap();
+        app.set_screen_name(format!(
+            "{ } {}x{}",
+            screen.name, screen.width, screen.height
+        )
+        .into());
+        app.set_screen_width(screen.width as f32);
+        app.set_screen_height(screen.height as f32);
     }
 
     fn on_save_screen(&mut self) {
+        //检查是否有打开的屏幕，并且跟当前屏幕大小一致，保存至配置文件中
+        let mut size_fit = false;
+        if let Ok(current_device) = SCREEN.lock(){
+            if let Some(screen) = current_device.as_ref(){
+                if screen.info.width == self.screen.width as u16 && screen.info.height == self.screen.height as u16{
+                    self.screen.device_address = Some(screen.info.address.clone());
+                    size_fit = true;
+                }
+            }
+        }
+        self.screen.fps = self.fps;
+        //错误的屏幕大小要清空
+        if !size_fit{
+            self.screen.device_address = None;
+        }
+        
         match self.screen.to_bytes() {
             Ok(file_data) => {
                 let file_name = format!("{}x{}.screen", self.screen.width, self.screen.height);
@@ -901,6 +1063,23 @@ impl CanvasEditorContext {
         if let Some(file) = dlg.pick_file() {
             match self.screen.load_from_file(file) {
                 Ok(()) => {
+                    //更新帧率
+                    let fps_str = format!("{}", self.screen.fps);
+                    self.on_change_fps(SharedString::from(&fps_str));
+                    //更新显示的屏幕大小
+                    let app = self.app.unwrap();
+                    for s in &self.screens{
+                        if s.width == self.screen.width && s.height == self.screen.height{
+                            app.set_screen_name(format!(
+                                "{ } {}x{}",
+                                s.name, s.width, s.height
+                            )
+                            .into());
+                            app.set_screen_width(s.width as f32);
+                            app.set_screen_height(s.height as f32);
+                            break;
+                        }
+                    }
                     //更新显示列表
                     self.list_model = Rc::new(VecModel::from(vec![]));
                     for idx in 0..self.screen.widgets.len() {
@@ -1073,6 +1252,61 @@ impl CanvasEditorContext {
         let y = (mouse_y * scale_y) as i32;
         (x, y)
     }
+
+    fn on_save_capture(&mut self) {
+        let image = self.screen.canvas.image_data().clone();
+        let file_name = format!("{}x{}.png", self.screen.width, self.screen.height);
+        std::thread::spawn(move || {
+            let dlg = rfd::FileDialog::new()
+                .add_filter("screen", &["screen"])
+                .set_file_name(file_name);
+            if let Some(file) = dlg.save_file() {
+                let _ = image.save(file);
+            }
+        });
+    }
+
+    fn on_change_device(&mut self, device: SharedString) {
+        println!("on_change_device: {}", device.as_str());
+        let devices = self.devices.clone();
+        std::thread::spawn(move ||{
+            for dev in devices{
+                if dev.label == device.as_str(){
+                    if let Ok(mut screen) = SCREEN.lock(){
+                        if screen.is_some() && screen.as_ref().unwrap().info.label == dev.label{
+                            println!("已经打开屏幕:{}", dev.label);
+                            return;
+                        }
+                        match UsbScreen::open(dev.clone()){
+                            Ok(s) => {
+                                screen.replace(CurrentUsbScreen { info: dev.clone(), screen: s });
+                            }
+                            Err(err) => {
+                                println!("屏幕打开失败:{:?}", err);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        });
+    }
+
+    fn on_change_fps(&mut self, fps: SharedString) {
+        println!("on_change_fps {fps}");
+        let fps = fps.to_string().replace("刷新率:", "").replace("帧/秒", "");
+        let mut fps = fps.parse::<i32>().unwrap_or(10);
+        if self.screen.width > 160 && self.screen.height > 128{
+            //320x240屏幕最高不超过12帧
+            if fps > 12{
+                fps = 12;
+            }
+        }
+        self.fps = fps;
+        let app = self.app.unwrap();
+        app.set_fps(format!("刷新率:{fps}帧/秒").into());
+    }
+
 }
 
 pub fn run() -> Result<()> {
@@ -1083,14 +1317,26 @@ pub fn run() -> Result<()> {
 
     let context = Rc::new(RefCell::new(CanvasEditorContext::new(app.as_weak())));
 
+    //渲染回调函数, 30ms调用一次，实际渲染根据选择的帧率渲染
     let context_clone = context.clone();
     let timer = Timer::default();
     timer.start(
         TimerMode::Repeated,
-        std::time::Duration::from_millis(100),
+        std::time::Duration::from_millis(66),
         move || {
             context_clone.borrow_mut().render_screen();
         },
+    );
+
+    //2秒钟刷新设备列表
+    let context_clone = context.clone();
+    let timer = Timer::default();
+    timer.start(
+        TimerMode::Repeated,
+        std::time::Duration::from_secs(2),
+        move || {
+            context_clone.borrow_mut().update_device_list();
+        }
     );
 
     // 定时刷新列表文字
@@ -1197,6 +1443,11 @@ pub fn run() -> Result<()> {
     });
 
     let context_clone = context.clone();
+    app.on_save_capture(move ||{
+        context_clone.borrow_mut().on_save_capture();
+    });
+
+    let context_clone = context.clone();
     app.on_open_screen(move || {
         context_clone.borrow_mut().on_open_screen();
     });
@@ -1220,6 +1471,17 @@ pub fn run() -> Result<()> {
             .borrow_mut()
             .on_color_picker_brightness_change();
     });
+
+    let context_clone = context.clone();
+    app.on_change_device(move |device| {
+        context_clone.borrow_mut().on_change_device(device);
+    });
+
+    let context_clone = context.clone();
+    app.on_change_fps(move |fps| {
+        context_clone.borrow_mut().on_change_fps(fps);
+    });
+
 
     #[cfg(windows)]
     info!("http服务端口号:{}", *crate::monitor::HTTP_PORT);

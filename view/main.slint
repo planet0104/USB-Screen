@@ -1,5 +1,5 @@
 import { HorizontalBox , ListView, VerticalBox, ScrollView, StandardListView, LineEdit, ComboBox, Slider, Button, StandardButton} from "std-widgets.slint";
-import { AButton } from "widgets/abutton.slint";
+import { AButton, SmallButton } from "widgets/abutton.slint";
 import { Span10px, Screen, WidgetConfig, WidgetObject, WidgetType, ConfirmDialog, ColorPicker } from "widgets/widgets.slint";
 
 export component CanvasEditor inherits Window{
@@ -9,10 +9,17 @@ export component CanvasEditor inherits Window{
     min-width: 700px;
     min-height: 500px;
 
-    in-out property <Screen> screen: { name: "ST7735 160x128", width: 160px, height: 128px };
+    in-out property <string> screen-name: "ST7735 160x128";
+    in-out property <length> screen-width: 160px;
+    in-out property <length> screen-height: 128px;
     in-out property <[string]> screen_names: [
         "ST7789 160x128"
     ];
+    in-out property <[string]> device_list: [
+        "未找到"
+    ];
+    in-out property <string> device_name: "未找到";
+    in-out property <string> fps: "刷新率:10帧/秒";
 
     out property <[WidgetType]> widgets: [
         {name: "pointer",  icon: @image-url("../images/icon_pointer.png"), text: "指针" },
@@ -24,6 +31,7 @@ export component CanvasEditor inherits Window{
         {name: "swap", icon: @image-url("../images/icon_swap.png"), text: "交换区" },
         {name: "swap_percent", icon: @image-url("../images/icon_swap.png"), text: "交换区%" },
         {name: "system", icon: @image-url("../images/icon_system.png"), text: "系统" },
+        {name: "uptime", icon: @image-url("../images/icon_time.png"), text: "运行时间" },
         {name: "kernel", icon: @image-url("../images/icon_version1.png"), text: "内核版本" },
         {name: "version", icon: @image-url("../images/icon_version2.png"), text: "系统版本" },
         {name: "host", icon: @image-url("../images/icon_host.png"), text: "主机" },
@@ -87,7 +95,11 @@ export component CanvasEditor inherits Window{
     in-out property <string> font-name: "凤凰点阵";
 
     callback change_screen(int);
+    callback change_device(string);
+    callback change_fps(string);
     callback save_screen();
+    callback save_capture();
+    callback run_mode();
     callback open_screen();
     callback open_font();
     callback mouse-move(length, length, length, length, bool);
@@ -211,23 +223,58 @@ export component CanvasEditor inherits Window{
                             ComboBox {
                                 height: self.preferred-height*1.8;
                                 model: screen_names;
-                                current-value: screen.name;
+                                current-value <=> screen-name;
                                 selected(name) => {
                                     change_screen(self.current-index);
                                 }
                             }
                             Span10px {}
-                            AButton {height: 26px; width: 95px; icon-opacity: 0.8; text-color: #bbf; icon-colorize: #bbf; use-icon: true; icon: @image-url("../images/icon_font.png"); border-color: #444; text: font-name; clicked => { open_font() } }
-                            Span10px {}
                             AButton { width: 40px; text: "打开"; clicked => { open_screen() } }
                             Span10px {}
                             AButton { width: 40px; text: "保存"; clicked => { save_screen() } }
+                            Span10px {}
+                            AButton { width: 40px; text: "截屏"; clicked => { save_capture() } }
+                            Span10px {}
+                            AButton { width: 40px; text: "运行"; clicked => { run_mode() } }
+                        }
+                    }
+                    Rectangle {
+                        height: 32px;
+                        HorizontalLayout {
+                            padding-top: 5px;
+                            Rectangle {}
+                            Text { text: "配置:"; }
+                            Span10px {}
+                            AButton {height: 26px; width: 95px; icon-opacity: 0.8; text-color: #bbf; icon-colorize: #bbf; use-icon: true; icon: @image-url("../images/icon_font.png"); border-color: #444; text: font-name; clicked => { open_font() } }
+                            Span10px {}
+                            ComboBox {
+                                height: self.preferred-height*1.8;
+                                model: ["刷新率:1帧/秒", "刷新率:2帧/秒", "刷新率:3帧/秒", "刷新率:4帧/秒", "刷新率:5帧/秒", "刷新率:10帧/秒", "刷新率:15帧/秒"];
+                                current-value <=> fps;
+                                selected(name) => {
+                                    fps = name;
+                                    change_fps(name);
+                                }
+                            }
+                            Span10px {}
+                            Span10px {}
+                            Text { text: "预览:"; }
+                            Span10px {}
+                            ComboBox {
+                                height: self.preferred-height*1.8;
+                                model <=> device_list;
+                                current-value <=> device_name;
+                                selected(name) => {
+                                    device_name = name;
+                                    change_device(device_name);
+                                }
+                            }
                         }
                     }
                     Rectangle {
                         canvas-focus := FocusScope {
                             width: (slider.value/100) * parent.width;
-                            height: self.width * (screen.height/screen.width);
+                            height: self.width * (screen-height/screen-width);
                             key-pressed(event) => {
                                 screen_key_event(event);
                                 accept
@@ -235,13 +282,13 @@ export component CanvasEditor inherits Window{
                         }
                         canvas-touch := TouchArea {
                             width: (slider.value/100) * parent.width;
-                            height: self.width * (screen.height/screen.width);
+                            height: self.width * (screen-height/screen-width);
                             moved => {
-                                mouse-move(canvas-touch.mouse-x/(self.width/screen.width), canvas-touch.mouse-y/(self.width/screen.width), screen.width, screen.height, canvas-touch.pressed)
+                                mouse-move(canvas-touch.mouse-x/(self.width/screen-width), canvas-touch.mouse-y/(self.width/screen-width), screen-width, screen-height, canvas-touch.pressed)
                             }
                             clicked => {
                                 canvas-focus.focus();
-                                mouse-click(canvas-touch.mouse-x/(self.width/screen.width), canvas-touch.mouse-y/(self.width/screen.width), screen.width, screen.height)
+                                mouse-click(canvas-touch.mouse-x/(self.width/screen-width), canvas-touch.mouse-y/(self.width/screen-width), screen-width, screen-height)
                             }
                             scroll-event(e) => {
                                 screen_mouse_scroll(e.delta-x, e.delta-y);
@@ -251,7 +298,7 @@ export component CanvasEditor inherits Window{
                         Rectangle {
                             background: #181818;
                             width: (slider.value/100) * parent.width;
-                            height: self.width * (screen.height/screen.width);
+                            height: self.width * (screen-height/screen-width);
                             border-radius: 6px;
                             canvas-image := Image {
                                 width: 100%;
@@ -323,14 +370,16 @@ export component CanvasEditor inherits Window{
                                         Text {
                                             color: item.uuid == active_widget_uuid? #1989fa: white;
                                             height: 16px;
+                                            width: item.uuid == active_widget_uuid ? 110px:200px;
+                                            font-size: 12px;
                                             text: item.name == "文本"? item.prefix+item.text: item.name;
                                         }
                                         if item.uuid == active_widget_uuid : 
                                             HorizontalLayout{
                                                 spacing: 4px;
-                                                AButton { enabled: item.index != 0; width: 30px; height: 20px; text: "上移"; clicked => { move_up_widget(item.uuid) } }
-                                                AButton { enabled: item.index+1 < object_list.length; width: 30px; height: 20px; text: "下移"; clicked => { move_down_widget(item.uuid) } }
-                                                AButton { width: 30px; height: 20px; text: "删除"; clicked => { delete_widget(item.uuid) } }
+                                                SmallButton { enabled: item.index != 0; width: 26px; height: 20px; text: "上移"; clicked => { move_up_widget(item.uuid) } }
+                                                SmallButton { enabled: item.index+1 < object_list.length; width: 26px; height: 20px; text: "下移"; clicked => { move_down_widget(item.uuid) } }
+                                                SmallButton { width: 26px; height: 20px; text: "删除"; clicked => { delete_widget(item.uuid) } }
                                             }
                                     }
                                     if item.index != 0 : VerticalLayout {
@@ -469,6 +518,22 @@ export component CanvasEditor inherits Window{
                                     width: 120px; height: 20px; placeholder-text: "输入名字搜索"; text <=> active_widget_tag2; input-type: text;
                                 }
                                 AButton { width: 34px; height: 24px; text: "确定"; clicked => { update-widget-tags() } }
+                            }
+                            //uptime控件 tag1代表显示类型
+                            if active_widget_type_name == "uptime" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "单位:"; width: 40px; }
+                                ComboBox {
+                                    width: self.preferred-width*1.2;
+                                    height: self.preferred-height*1.5;
+                                    model: ["秒", "分钟", "小时"];
+                                    current-value: active_widget_tag1==2?"小时":( active_widget_tag1=="1"?"分钟":"秒" );
+                                    selected => {
+                                        active_widget_tag1 = self.current-index;
+                                        update-widget-tags()
+                                    }
+                                }
                             }
                             if active_widget_type_name == "images" : HorizontalBox {
                                 padding-top: 5px;

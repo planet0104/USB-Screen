@@ -1,5 +1,5 @@
 use crate::{
-    monitor,
+    monitor::{self, system_uptime},
     nmc::ICONS,
     utils::{degrees_to_radians, resize_image, test_resize_image},
 };
@@ -236,6 +236,18 @@ impl Widget for TextWidget {
                         }
                     }
                 },
+                "uptime" => {
+                    let uptime = system_uptime();
+                    let uptime_str = match self.tag1.as_str() {
+                        //运行分钟数
+                        "1" => Some(format!("{}", uptime.minutes)),
+                        //运行小时数
+                        "2" => Some(format!("{}", uptime.hours)),
+                        //运行秒数
+                        _ => Some(format!("{}", uptime.seconds)),
+                    };
+                    uptime_str
+                },
                 "disk_read_speed" => monitor::disk_speed_per_sec().map(|(r, _w)| r),
                 "disk_write_speed" => monitor::disk_speed_per_sec().map(|(_r, w)| w),
                 "received_speed" => monitor::network_speed_per_sec().map(|(r, _t)| r),
@@ -260,7 +272,7 @@ impl Widget for TextWidget {
             x -= self.font_size as i32 / 2;
             y -= self.font_size as i32 / 2;
             context.draw_image_at(&ICONS[img_idx], x, y, Some(o), None);
-        } else if self.type_name != "weather" && self.tag1 == "1" {
+        } else if self.type_name != "weather" && self.type_name != "uptime" && self.tag1 == "1" {
             //是否渲染成进度条
             let percent = self
                 .text

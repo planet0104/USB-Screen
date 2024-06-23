@@ -30,6 +30,20 @@ pub struct SaveableScreen {
     pub font_name: String,
 }
 
+#[derive(Clone, Encode, Decode)]
+pub struct SaveableScreenV2 {
+    pub width: u32,
+    pub height: u32,
+    pub model: String,
+    //最大刷新帧率
+    pub fps: i32,
+    //指定链接设备编号
+    pub device_address: Option<String>,
+    pub widgets: Vec<SaveableWidget>,
+    pub font: Option<Vec<u8>>,
+    pub font_name: String
+}
+
 pub struct ScreenRender {
     pub width: u32,
     pub height: u32,
@@ -38,6 +52,8 @@ pub struct ScreenRender {
     pub canvas: OffscreenCanvas,
     pub font_name: String,
     pub font: Option<Vec<u8>>,
+    pub fps: i32,
+    pub device_address: Option<String>
 }
 
 impl ScreenRender {
@@ -60,6 +76,8 @@ impl ScreenRender {
             font_name,
             font: font_file_clone.map(|v| v.to_vec()),
             widgets: vec![],
+            fps: 10,
+            device_address: None,
         })
     }
 
@@ -195,9 +213,43 @@ impl ScreenRender {
         let uncompressed = decompress_size_prepended(&compressed)?;
         let saveable: Result<(SaveableScreen, usize), bincode::error::DecodeError> =
             bincode::decode_from_slice(&uncompressed, bincode::config::standard());
+
+        //解析失败尝试使用V2解析
+        if saveable.is_err(){
+            self.load_from_file_v2(&uncompressed)?;
+            return Ok(());
+        }
+        
         let (saveable, _) = saveable?;
         self.width = saveable.width;
         self.height = saveable.height;
+        self.canvas =
+            OffscreenCanvas::new(saveable.width, saveable.height, self.canvas.font().clone());
+        if let Some(font) = saveable.font {
+            self.set_font(Some(&font), saveable.font_name)?;
+        }
+        self.widgets.clear();
+        for w in saveable.widgets {
+            match w {
+                SaveableWidget::TextWidget(txt) => {
+                    self.widgets.push(Box::new(txt));
+                }
+                SaveableWidget::ImageWidget(img) => {
+                    self.widgets.push(Box::new(img));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn load_from_file_v2(&mut self, uncompressed: &[u8]) -> Result<()> {
+        let saveable: Result<(SaveableScreenV2, usize), bincode::error::DecodeError> =
+            bincode::decode_from_slice(&uncompressed, bincode::config::standard());
+        let (saveable, _) = saveable?;
+        self.width = saveable.width;
+        self.height = saveable.height;
+        self.fps = saveable.fps;
+        self.device_address = saveable.device_address;
         self.canvas =
             OffscreenCanvas::new(saveable.width, saveable.height, self.canvas.font().clone());
         if let Some(font) = saveable.font {
@@ -221,6 +273,9 @@ impl ScreenRender {
         let uncompressed = decompress_size_prepended(&file)?;
         let saveable: Result<(SaveableScreen, usize), bincode::error::DecodeError> =
             bincode::decode_from_slice(&uncompressed, bincode::config::standard());
+        if saveable.is_err(){
+            return Self::new_from_file_v2(&uncompressed);
+        }
         let (saveable, _) = saveable?;
         let model = saveable.model;
         let mut render =
@@ -242,14 +297,43 @@ impl ScreenRender {
         Ok(render)
     }
 
+    pub fn new_from_file_v2(uncompressed: &[u8]) -> Result<ScreenRender> {
+        let saveable: Result<(SaveableScreenV2, usize), bincode::error::DecodeError> =
+            bincode::decode_from_slice(&uncompressed, bincode::config::standard());
+        
+        let (saveable, _) = saveable?;
+        let model = saveable.model;
+        let mut render =
+            ScreenRender::new(model, saveable.width, saveable.height, None, String::new())?;
+        if let Some(font) = saveable.font {
+            render.set_font(Some(&font), saveable.font_name)?;
+        }
+        render.fps = saveable.fps;
+        render.device_address = saveable.device_address;
+        render.widgets.clear();
+        for w in saveable.widgets {
+            match w {
+                SaveableWidget::TextWidget(txt) => {
+                    render.widgets.push(Box::new(txt));
+                }
+                SaveableWidget::ImageWidget(img) => {
+                    render.widgets.push(Box::new(img));
+                }
+            }
+        }
+        Ok(render)
+    }
+
     pub fn to_bytes(&mut self) -> Result<Vec<u8>> {
-        let mut saveable = SaveableScreen {
+        let mut saveable = SaveableScreenV2 {
             width: self.width,
             height: self.height,
             model: self.model.clone(),
             font: self.font.clone(),
             font_name: self.font_name.clone(),
             widgets: vec![],
+            fps: self.fps,
+            device_address: self.device_address.clone()
         };
         for idx in 0..self.widgets.len() {
             if let Some(widget) = self.widgets[idx].as_any_mut().downcast_mut::<TextWidget>() {
