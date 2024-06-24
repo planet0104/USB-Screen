@@ -6,8 +6,7 @@ use crate::{
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use image::{
-    imageops::{resize, FilterType},
-    Rgba, RgbaImage,
+    imageops::{resize, FilterType}, RgbImage, Rgba, RgbaImage
 };
 use offscreen_canvas::{OffscreenCanvas, ResizeOption, RotateOption, WHITE};
 use std::any::Any;
@@ -243,6 +242,8 @@ impl Widget for TextWidget {
                         "1" => Some(format!("{}", uptime.minutes)),
                         //运行小时数
                         "2" => Some(format!("{}", uptime.hours)),
+                        //运行天数
+                        "3" => Some(format!("{}", uptime.days)),
                         //运行秒数
                         _ => Some(format!("{}", uptime.seconds)),
                     };
@@ -476,12 +477,14 @@ impl Widget for ImageWidget {
             );
             context.fill_rect(rect, Rgba(*color));
         } else {
+            if self.frame_index >= self.image_data.frames.len(){
+                self.frame_index = self.image_data.frames.len()-1;
+            }
             let image = RgbaImage::from_raw(
                 self.image_data.width,
                 self.image_data.height,
                 self.image_data.frames[self.frame_index].clone(),
-            )
-            .unwrap();
+            ).unwrap_or(RgbaImage::new(30, 30));
             let src =
                 offscreen_canvas::Rect::new(0, 0, image.width() as i32, image.height() as i32);
             let pos = offscreen_canvas::Rect::from(

@@ -27,6 +27,7 @@ const OHMS_EXE_FILE: &[u8] =
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemUptime {
+    pub days: u32,
     pub hours: u32,
     pub minutes: u32,
     pub seconds: u32,
@@ -769,10 +770,15 @@ pub fn lunar_date() -> String {
 }
 
 pub fn system_uptime() -> SystemUptime{
-    let duration = Duration::from_secs(sysinfo::System::uptime()).human_duration();
+    let total_seconds = sysinfo::System::uptime();
+    //减去天
+    let days = total_seconds/(60*60*24);
+    let total_seconds = total_seconds - days*(60*60*24);
+    let duration = Duration::from_secs(total_seconds).human_duration();
     let duration = format!("{duration}");
     let arr:Vec<&str> = duration.split(":").collect();
     let mut uptime = SystemUptime::default();
+    uptime.days = days as u32;
     if arr.len() > 2{
         uptime.hours = arr[0].parse().unwrap_or(0);
         uptime.minutes = arr[1].parse().unwrap_or(0);

@@ -106,12 +106,14 @@ export component CanvasEditor inherits Window{
     callback mouse-click(length, length, length, length);
     callback update-widget-position();
     callback update-widget-text();
+    callback update-widget-text-color();
     callback update-widget-tags();
     callback update-widget-image();
     callback update-widget-image-color();
     callback new-image-ready();
     callback select_widget(string);
     callback delete_widget(string);
+    callback clone_widget(string);
     callback move_up_widget(string);
     callback move_down_widget(string);
     callback screen_mouse_scroll(length, length);
@@ -234,8 +236,8 @@ export component CanvasEditor inherits Window{
                             AButton { width: 40px; text: "保存"; clicked => { save_screen() } }
                             Span10px {}
                             AButton { width: 40px; text: "截屏"; clicked => { save_capture() } }
-                            Span10px {}
-                            AButton { width: 40px; text: "运行"; clicked => { run_mode() } }
+                            // Span10px {}
+                            // AButton { width: 40px; text: "运行"; clicked => { run_mode() } }
                         }
                     }
                     Rectangle {
@@ -362,23 +364,27 @@ export component CanvasEditor inherits Window{
                                             width: 14px;
                                             height: 14px;
                                         }
-                                        if item.type_name == "text" : Image{
+                                        if item.type_name != "images" : Image{
                                             source:  item.uuid == active_widget_uuid? @image-url("../images/icon_text_blue.png"): @image-url("../images/icon_text.png");
                                             width: 14px;
                                             height: 14px;
                                         }
-                                        Text {
-                                            color: item.uuid == active_widget_uuid? #1989fa: white;
-                                            height: 16px;
-                                            width: item.uuid == active_widget_uuid ? 110px:200px;
-                                            font-size: 12px;
-                                            text: item.name == "文本"? item.prefix+item.text: item.name;
+                                        Rectangle {
+                                            clip: true;
+                                            width: item.uuid == active_widget_uuid ? 60px:170px;
+                                            Text {
+                                                color: item.uuid == active_widget_uuid? #1989fa: white;
+                                                height: 16px;
+                                                font-size: 12px;
+                                                text: item.name == "文本"? item.prefix+item.text: item.name;
+                                            }
                                         }
                                         if item.uuid == active_widget_uuid : 
                                             HorizontalLayout{
                                                 spacing: 4px;
                                                 SmallButton { enabled: item.index != 0; width: 26px; height: 20px; text: "上移"; clicked => { move_up_widget(item.uuid) } }
                                                 SmallButton { enabled: item.index+1 < object_list.length; width: 26px; height: 20px; text: "下移"; clicked => { move_down_widget(item.uuid) } }
+                                                SmallButton { width: 26px; height: 20px; text: "复制"; clicked => { clone_widget(item.uuid) } }
                                                 SmallButton { width: 26px; height: 20px; text: "删除"; clicked => { delete_widget(item.uuid) } }
                                             }
                                     }
@@ -444,7 +450,7 @@ export component CanvasEditor inherits Window{
                                 padding-top: 5px;
                                 padding-bottom: 0px;
                                 Text { text: "颜色:"; width: 40px; }
-                                LineEdit { width: 80px; height: 20px; text <=> active_widget_color-str; input-type: text; edited => { update-widget-text() } }
+                                LineEdit { width: 80px; height: 20px; text <=> active_widget_color_str; input-type: text; edited => { update-widget-text-color() } }
                                 Rectangle { width: 5px; }
                                 color-rect := Rectangle {
                                     background: active_widget_color;
@@ -527,8 +533,8 @@ export component CanvasEditor inherits Window{
                                 ComboBox {
                                     width: self.preferred-width*1.2;
                                     height: self.preferred-height*1.5;
-                                    model: ["秒", "分钟", "小时"];
-                                    current-value: active_widget_tag1==2?"小时":( active_widget_tag1=="1"?"分钟":"秒" );
+                                    model: ["秒", "分钟", "小时", "天"];
+                                    current-value: active_widget_tag1 ==3? "天": (active_widget_tag1==2?"小时":( active_widget_tag1=="1"?"分钟":"秒" ));
                                     selected => {
                                         active_widget_tag1 = self.current-index;
                                         update-widget-tags()

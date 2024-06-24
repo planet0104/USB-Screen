@@ -440,6 +440,23 @@ impl CanvasEditorContext {
         }
     }
 
+    fn on_update_widget_text_color(&mut self) {
+        let color_str = self.app.unwrap().get_active_widget_color_str().to_string();
+        let mut color = None;
+        if color_str.len() > 0 {
+            if let Ok(c) = HexColor::from_str(&color_str) {
+                color = Some([c.r, c.g, c.b, c.a]);
+            }
+        }
+
+        if let (Some(color), Some(widget)) = (color, self
+            .active_widget()
+            .and_then(|w| w.as_any_mut().downcast_mut::<TextWidget>()))
+        {
+            widget.color = color;
+        }
+    }
+
     fn on_update_widget_image(&mut self) {
         let temp_image_clone = self.temp_image.clone();
         let (screen_width, screen_height) = (self.screen.width, self.screen.height);
@@ -878,6 +895,92 @@ impl CanvasEditorContext {
                     .unwrap()
                     .set_active_widget_uuid(SharedString::from(""));
             }
+        }
+    }
+
+    fn clone_widget(&mut self, uuid: &str) {
+        let widget_index = match self
+            .screen
+            .widgets
+            .iter()
+            .position(|item| item.id() == uuid)
+        {
+            None => return,
+            Some(i) => i,
+        };
+
+        let app = self.app.unwrap();
+
+        let widget_type_name:SharedString = self.screen.widgets[widget_index].type_name().into();
+        let widget_type_label = if widget_type_name.as_str() == "weather" {
+            SharedString::new()
+        } else {
+            app.get_widget_type_label()
+        };
+
+        self.active_id = self
+            .screen
+            .add_widget(&widget_type_name, &widget_type_label, self.screen.widgets[widget_index].position().left, self.screen.widgets[widget_index].position().top);
+
+        if self.active_id.is_none() {
+            return;
+        }
+        let uuid = self.active_id.clone().unwrap();
+        let mut text = "".to_string();
+        let mut prefix = "".to_string();
+        let mut tag1 = "".to_string();
+        let mut tag2 = "".to_string();
+
+        let mut text_widget_clone = None;
+        let mut image_widget_clone = None;
+
+        if let Some(ref_text_widget) = self.screen.widgets[widget_index].as_any_mut().downcast_mut::<TextWidget>() {
+            text_widget_clone = Some(ref_text_widget.clone());
+        }
+        if let Some(ref_image_widget) = self.screen.widgets[widget_index].as_any_mut().downcast_mut::<ImageWidget>() {
+            image_widget_clone = Some(ref_image_widget.clone());
+        }
+
+        if let Some((idx, w)) = self.screen.find_widget(&uuid) {
+
+            if let Some(text_widget) = w.as_any_mut().downcast_mut::<TextWidget>() {
+                *text_widget = text_widget_clone.unwrap();
+                text = text_widget.text.to_string();
+                prefix = text_widget.prefix.to_string();
+                tag1 = text_widget.tag1.to_string();
+                tag2 = text_widget.tag2.to_string();
+                text_widget.id = uuid.clone();
+            }
+            if let Some(image_widget) = w.as_any_mut().downcast_mut::<ImageWidget>() {
+                *image_widget = image_widget_clone.unwrap();
+                image_widget.id = uuid.clone();
+            }
+
+            w.position_mut().offset(5, 5);
+
+            let model = WidgetObject {
+                index: idx as i32,
+                name: SharedString::from(if w.type_name() == "images" {
+                    "图像"
+                } else {
+                    "文本"
+                }),
+                type_name: SharedString::from(w.type_name()),
+                uuid: SharedString::from(w.id()),
+                text: SharedString::from(&text),
+                prefix: SharedString::from(&prefix),
+                tag1: SharedString::from(&tag1),
+                tag2: SharedString::from(&tag2),
+            };
+            info!("添加了一个:{:?}", model);
+
+            self.list_model.push(model);
+
+            app.set_widget_type_index(0);
+            let ret = self.screen.setup_monitor();
+            info!("更新监视器:{:?}", ret);
+
+            self.show_active_widget();
         }
     }
 
@@ -1391,6 +1494,11 @@ pub fn run() -> Result<()> {
     });
 
     let context_clone = context.clone();
+    app.on_update_widget_text_color(move || {
+        context_clone.borrow_mut().on_update_widget_text_color();
+    });
+
+    let context_clone = context.clone();
     app.on_update_widget_tags(move || {
         context_clone.borrow_mut().on_update_widget_tags();
     });
@@ -1420,6 +1528,11 @@ pub fn run() -> Result<()> {
     let context_clone = context.clone();
     app.on_delete_widget(move |uuid| {
         context_clone.borrow_mut().delete_widget(uuid.as_str());
+    });
+
+    let context_clone = context.clone();
+    app.on_clone_widget(move |uuid| {
+        context_clone.borrow_mut().clone_widget(uuid.as_str());
     });
 
     let context_clone = context.clone();
