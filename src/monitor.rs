@@ -1,8 +1,11 @@
 use anyhow::{anyhow, Result};
 use chinese_number::{ChineseCase, ChineseCountMethod, ChineseVariant, NumberToChinese};
 use chrono::{Datelike, Local};
+use fast_image_resize::{images::Image, Resizer};
 use human_repr::HumanDuration;
+use image::{DynamicImage, RgbImage};
 use log::{debug, error, info};
+use nokhwa::{pixel_format::RgbFormat, utils::{CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution}, Camera};
 use once_cell::sync::Lazy;
 use rust_ephemeris::lunnar::SolorDate;
 use serde::{Deserialize, Serialize};
@@ -60,6 +63,14 @@ pub struct HardwareData {
     pub gpu_infos: Vec<HardwareInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebcamInfo{
+    pub index: u32,
+    pub fps: u32,
+    pub width: u32,
+    pub height: u32
+}
+
 pub struct SystemInfo {
     watch_memory: bool,
     watch_disk: bool,
@@ -109,7 +120,12 @@ pub struct SystemInfo {
     cpu_freq_query_task: Option<std::thread::JoinHandle<()>>,
     watch_disk_speed_task: Option<std::thread::JoinHandle<()>>,
     watch_network_speed_task: Option<std::thread::JoinHandle<()>>,
+    watch_webcam_task: Option<std::thread::JoinHandle<()>>,
     hardware_monitor_service: Option<Child>,
+    //缓存最新的相机图像
+    webcam_frame: Option<RgbImage>,
+    //监控的相机编号以及帧率
+    webcam_info: Option<WebcamInfo>
 }
 
 impl SystemInfo {
@@ -164,6 +180,9 @@ impl SystemInfo {
             hardware_monitor_service: None,
             local_ip: EMPTY_STRING.to_string(),
             net_ip: None,
+            webcam_frame: None,
+            webcam_info: None,
+            watch_webcam_task: None,
         }
     }
 }
@@ -197,12 +216,19 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
 
         let mut last_update_time = 0;
         let mut last_update_net_ip_time = 0;
+
         //(city, time)
         let last_weather_update_store: Arc<Mutex<(Option<City>, u128)>> =
             Arc::new(Mutex::new((None, 0)));
 
         loop {
             let current_time = current_timestamp();
+
+            //相机根据帧率刷新
+            let watch_webcam = match ctx.read() {
+                Err(_err) => return,
+                Ok(ctx) => ctx.webcam_info.is_some(),
+            };
 
             //天气30分钟更新一次
             let watch_weather_data = match ctx.read() {
@@ -363,6 +389,14 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
                     try_write(|mut ctx| {
                         if ctx.watch_disk_speed_task.is_none() {
                             ctx.watch_disk_speed_task = Some(start_disk_counter_thread());
+                        }
+                    });
+                }
+
+                if watch_webcam {
+                    try_write(|mut ctx| {
+                        if ctx.watch_webcam_task.is_none() {
+                            ctx.watch_webcam_task = Some(start_webcam_capture_thread());
                         }
                     });
                 }
@@ -564,6 +598,12 @@ pub fn watch_net_ip(v: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn watch_webcam(webcam_info: Option<WebcamInfo>) -> Result<()> {
+    let mut sys_info = SYSTEM_INFO.write().map_err(|err| anyhow!("{:?}", err))?;
+    sys_info.webcam_info = webcam_info;
+    Ok(())
+}
+
 pub fn num_cpus() -> Option<String> {
     Some(try_read_ctx()?.num_cpus.clone())
 }
@@ -604,6 +644,10 @@ pub fn cpu_usage_percpu(index: usize) -> Option<String> {
 
 pub fn cpu_usage() -> Option<String> {
     Some(try_read_ctx()?.cpu_usage.clone())
+}
+
+pub fn webcam_frame() -> Option<RgbImage> {
+    try_read_ctx()?.webcam_frame.clone()
 }
 
 pub fn cpu_clock_speed(index: Option<usize>) -> Option<String> {
@@ -970,6 +1014,109 @@ pub fn start_network_counter_thread() -> std::thread::JoinHandle<()> {
             try_write(move |mut ctx| {
                 ctx.network_speed_per_sec = (received_str.to_owned(), transmitted_str.to_owned());
             });
+        }
+    })
+}
+
+
+pub fn start_webcam_capture_thread() -> std::thread::JoinHandle<()> {
+    debug!("start_webcam_capture_thread...");
+    std::thread::spawn(move || {
+
+        let mut camera:Option<Camera> = None;
+        let mut camera_index:i32 = -1;
+        
+        loop {
+            let mut watch_webcam = None;
+            if let Ok(ctx) = SYSTEM_INFO.read() {
+                watch_webcam = ctx.webcam_info.clone();
+                drop(ctx);
+            }
+
+            if watch_webcam.is_none() {
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }else if let Some(webcam_info) = watch_webcam{
+                if camera.is_none() || camera_index != webcam_info.index as i32{
+                    camera_index = webcam_info.index as i32;
+                    //相机需要重新打开
+                    if camera.is_some(){
+                        let cam = camera.take();
+                        drop(cam);
+                    }
+                    info!("打开相机...");
+                    let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+                    match Camera::new(CameraIndex::Index(camera_index as u32), requested){
+                        Ok(cam) => camera = Some(cam),
+                        Err(err) =>{
+                            error!("相机打开失败:{err:?}");
+                            std::thread::sleep(Duration::from_millis(3000));
+                            continue;
+                        }
+                    };
+                }
+
+                if let Some(cam) = camera.as_mut(){
+                    //开始拍照
+                    let t = Instant::now();
+                    if let Ok(frame) = cam.frame(){
+                        if let Ok(decoded) = frame.decode_image::<RgbFormat>(){
+                            // info!("拍照大小:{}x{}", decoded.width(), decoded.height());
+                            //缩放，最大不超过屏幕大小
+                            let mut dst_width = decoded.width();
+                            let mut dst_height = decoded.height();
+                            // info!("图像缩放前大小:{dst_width}x{dst_height}");
+                            if dst_width> webcam_info.width{
+                                let scale = webcam_info.width as f32 / dst_width as f32;
+                                dst_width = webcam_info.width;
+                                dst_height = (scale*dst_height as f32) as u32;
+                            }
+                            if dst_height> webcam_info.height{
+                                let scale = webcam_info.height as f32 / dst_height as f32;
+                                dst_height = webcam_info.height;
+                                dst_width = (scale*dst_width as f32) as u32;
+                            }
+                            // info!("图像缩放后大小:{dst_width}x{dst_height}");
+                            let mut dst_image = Image::new(
+                                dst_width,
+                                dst_height,
+                                fast_image_resize::PixelType::U8x3,
+                            );
+
+                            let mut src_image = Image::new(
+                                decoded.width(),
+                                decoded.height(),
+                                fast_image_resize::PixelType::U8x3,
+                            );
+                            src_image.buffer_mut().copy_from_slice(&decoded);
+
+                            // Create Resizer instance and resize source image
+                            // into buffer of destination image
+                            let mut resizer = Resizer::new();
+                            let r = resizer.resize(&src_image, &mut dst_image, None);
+                            if r.is_err(){
+                                std::thread::sleep(Duration::from_millis(1000));
+                                continue;
+                            }
+
+                            //写入缓存
+                            try_write(move |mut ctx| {
+                                if let Some(img) = RgbImage::from_raw(dst_image.width(), dst_image.height(), dst_image.buffer().to_vec()){
+                                    ctx.webcam_frame = Some(img);
+                                }
+                            });
+                        }
+                    }
+                    //延迟，减去可能花费的拍照时间
+                    let dur = t.elapsed().as_millis() as u64;
+                    let delay = 1000/webcam_info.fps as u64;
+                    if dur >= delay{
+                        std::thread::sleep(Duration::from_millis(1));
+                    }else{
+                        std::thread::sleep(Duration::from_millis(delay - dur));
+                    }
+                }
+            }
         }
     })
 }

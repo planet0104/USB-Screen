@@ -1,11 +1,10 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{path::Path, time::{Duration, Instant}};
+use std::{path::Path, process::Command, time::{Duration, Instant}};
 
-use anyhow::Result;
-use human_repr::HumanDuration;
+use anyhow::{anyhow, Result};
 use image::{buffer::ConvertBuffer, RgbImage};
-use log::info;
+use log::{error, info};
 use tao::event_loop::ControlFlow;
 use usb_screen::find_and_open_a_screen;
 
@@ -36,9 +35,13 @@ fn main() -> Result<()> {
             _ => None,
         };
 
+        info!("screen_file={:?}", screen_file);
+
         if let Some(file) = screen_file {
-            create_tray_icon(file)?;
-            return Ok(());
+            if file != "editor"{
+                create_tray_icon(file)?;
+                return Ok(());
+            }
         }
     }
 
@@ -53,6 +56,7 @@ fn open_usb_screen(file: String) -> Result<()>{
 
     render.setup_monitor()?;
     let mut usb_screen = usb_screen::find_and_open_a_screen();
+    info!("open_usb_screen: usb_screen={}", usb_screen.is_some());
     let mut last_draw_time = Instant::now();
     let frame_duration = 1000/render.fps as u128;
 
@@ -67,7 +71,7 @@ fn open_usb_screen(file: String) -> Result<()>{
         // let rgb565 = rgb888_to_rgb565_u16(&frame, frame.width() as usize, frame.height() as usize);
         if usb_screen.is_none() {
             std::thread::sleep(Duration::from_millis(2000));
-            println!("open USB Screen...");
+            info!("open USB Screen...");
             usb_screen = find_and_open_a_screen();
         } else {
             let screen = usb_screen.as_mut().unwrap();
@@ -86,15 +90,18 @@ fn open_usb_screen(file: String) -> Result<()>{
 
 fn create_tray_icon(file: String) -> Result<()> {
     std::thread::spawn(move ||{
-        let _ = open_usb_screen(file);
+        let ret = open_usb_screen(file);
+        error!("{:?}", ret);
     });
 
-    // 图表必须运行在UI线程上
+    // 图标必须运行在UI线程上
     let event_loop = tao::event_loop::EventLoopBuilder::new().build();
 
     let tray_menu = Box::new(tray_icon::menu::Menu::new());
     let quit_i = tray_icon::menu::MenuItem::new("退出", true, None);
+    let editor_i = tray_icon::menu::MenuItem::new("编辑器", true, None);
     let _ = tray_menu.append(&quit_i);
+    let _ = tray_menu.append(&editor_i);
     let mut tray_icon = None;
     let mut menu_channel = None;
 
@@ -139,6 +146,12 @@ fn create_tray_icon(file: String) -> Result<()> {
             if let Ok(event) = menu_channel.try_recv() {
                 if event.id == quit_i.id() {
                     *control_flow = ControlFlow::Exit;
+                }else if event.id == editor_i.id() {
+                    //启动自身
+                    if let Ok(_) = run_as_editor(){
+                        //退出托盘
+                        *control_flow = ControlFlow::Exit;
+                    }
                 }
             }
         }
@@ -264,5 +277,18 @@ pub fn run_as_admin(params: Option<&str>) -> Result<()> {
 
         ShellExecuteExA(&mut sh_exec_info)?;
     }
+    Ok(())
+}
+
+
+pub fn run_as_editor() -> Result<()> {
+    let exe_path = std::env::current_exe()?;
+    let exe_path = exe_path.to_str();
+    if exe_path.is_none() {
+        return Err(anyhow!("exe path error!"));
+    }
+    let mut command = Command::new(exe_path.unwrap());
+    command.arg("editor");
+    command.spawn()?;
     Ok(())
 }

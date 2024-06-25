@@ -1,20 +1,22 @@
 use crate::{
-    monitor::{self, system_uptime},
+    monitor::{self, system_uptime, webcam_frame},
     nmc::ICONS,
     utils::{degrees_to_radians, resize_image, test_resize_image},
 };
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use image::{
-    imageops::{resize, FilterType}, RgbImage, Rgba, RgbaImage
+    buffer::ConvertBuffer, imageops::{resize, FilterType}, Rgba, RgbaImage
 };
 use offscreen_canvas::{OffscreenCanvas, ResizeOption, RotateOption, WHITE};
+use serde::{Deserialize, Serialize};
+use core::prelude::v1;
 use std::any::Any;
 use uuid::Uuid;
 
 static DEFAULT_IMAGE: &[u8] = include_bytes!("../images/icon_photo.png");
 
-#[derive(Debug, Clone, Default, Encode, Decode)]
+#[derive(Debug, Clone, Default, Encode, Decode, Deserialize, Serialize)]
 pub struct Rect {
     pub left: i32,
     pub top: i32,
@@ -122,9 +124,27 @@ pub trait Widget {
     fn position_mut(&mut self) -> &mut Rect;
     fn type_name(&self) -> &str;
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn is_text(&self) -> bool{
+        self.type_name() != "images" && self.type_name() != "webcam"
+    }
+    fn is_image(&self) -> bool{
+        self.type_name() == "images"
+    }
+    fn is_webcam(&self) -> bool{
+        self.type_name() == "webcam"
+    }
+    fn get_label(&self) -> &str{
+        if self.is_image() {
+            "图像"
+        }else if self.is_webcam() {
+            "摄像头"
+        } else {
+            "文本"
+        }
+    }
 }
 
-#[derive(Clone, Encode, Decode)]
+#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
 pub struct TextWidget {
     pub id: String,
     pub text: String,
@@ -355,7 +375,7 @@ impl Widget for TextWidget {
     }
 }
 
-#[derive(Default, Clone, Encode, Decode)]
+#[derive(Default, Clone, Encode, Decode, Deserialize, Serialize)]
 pub struct ImageData {
     pub width: u32,
     pub height: u32,
@@ -428,7 +448,7 @@ impl ImageData {
     }
 }
 
-#[derive(Clone, Encode, Decode)]
+#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
 pub struct ImageWidget {
     pub id: String,
     pub image_data: ImageData,
@@ -441,9 +461,16 @@ pub struct ImageWidget {
     pub num_widget_index: usize,
     // 一共有多少个当前类型的组件
     pub num_widget: usize,
+    pub tag1: Option<String>,
+    pub tag2: Option<String>,
 }
 
 impl ImageWidget {
+    pub fn from_v10(img:v10::ImageWidget) -> Self{
+        Self { id: img.id, image_data: img.image_data, rotation: img.rotation, position: img.position, type_name: img.type_name, frame_index: img.frame_index, color: img.color,
+            num_widget_index: img.num_widget_index, num_widget: img.num_widget, tag1: None, tag2: None }
+    }
+    
     pub fn new(x: i32, y: i32, type_name: &str) -> Self {
         let image = image::load_from_memory(DEFAULT_IMAGE).unwrap().to_rgba8();
         let image = resize(&image, 50, 50, FilterType::Nearest);
@@ -462,6 +489,8 @@ impl ImageWidget {
             frame_index: 0,
             num_widget_index: 0,
             num_widget: 1,
+            tag1: None,
+            tag2: None,
         }
     }
 }
@@ -476,7 +505,37 @@ impl Widget for ImageWidget {
                 self.position.height(),
             );
             context.fill_rect(rect, Rgba(*color));
-        } else {
+        }
+        //是否是相机
+        else if self.type_name == "webcam"{
+            //获取相机图像
+            if let Some(image) = webcam_frame(){
+                let src =
+                    offscreen_canvas::Rect::new(0, 0, image.width() as i32, image.height() as i32);
+
+                //按照宽度比例绘制
+                let width = self.position.width();
+                let height = ((image.height() as f32 / image.width() as f32)*width as f32) as i32;
+                
+                let pos = offscreen_canvas::Rect::from(
+                    self.position.left,
+                    self.position.top,
+                    width,
+                    height,
+                );
+
+                context.draw_image_with_src_and_dst(&image.convert(), &src, &pos, FilterType::Nearest);
+            }else{
+                //未打开相机，显示白色
+                let rect = offscreen_canvas::Rect::from(
+                    self.position.left,
+                    self.position.top,
+                    self.position.width(),
+                    self.position.height(),
+                );
+                context.fill_rect(rect, WHITE);
+            }
+        }else {
             if self.frame_index >= self.image_data.frames.len(){
                 self.frame_index = self.image_data.frames.len()-1;
             }
@@ -493,14 +552,20 @@ impl Widget for ImageWidget {
                 self.position.width(),
                 self.position.height(),
             );
-            let option = RotateOption::from(
-                (
-                    self.position.width() as f32 / 2.,
-                    self.position.height() as f32 / 2.,
-                ),
-                degrees_to_radians(self.rotation),
-            );
-            context.draw_image_with_src_and_dst_and_rotation(&image, &src, &pos, option);
+
+            if self.rotation == 0.{
+                //不旋转
+                context.draw_image_with_src_and_dst(&image, &src, &pos, FilterType::Nearest);
+            }else{
+                let option = RotateOption::from(
+                    (
+                        self.position.width() as f32 / 2.,
+                        self.position.height() as f32 / 2.,
+                    ),
+                    degrees_to_radians(self.rotation),
+                );
+                context.draw_image_with_src_and_dst_and_rotation(&image, &src, &pos, option);
+            }
             self.frame_index += 1;
             if self.frame_index >= self.image_data.frames.len() {
                 self.frame_index = 0;
@@ -545,8 +610,119 @@ impl Widget for ImageWidget {
     }
 }
 
-#[derive(Clone, Encode, Decode)]
+#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
 pub enum SaveableWidget {
     TextWidget(TextWidget),
     ImageWidget(ImageWidget),
+}
+
+//老版本
+pub mod v10{
+    use super::*;
+
+    #[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+    pub enum SaveableWidget {
+        TextWidget(super::TextWidget),
+        ImageWidget(ImageWidget),
+    }
+
+    #[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+    pub struct ImageWidget {
+        pub id: String,
+        pub image_data: ImageData,
+        pub rotation: f32,
+        pub position: Rect,
+        pub type_name: String,
+        pub frame_index: usize,
+        //是否为纯色
+        pub color: Option<[u8; 4]>,
+        pub num_widget_index: usize,
+        // 一共有多少个当前类型的组件
+        pub num_widget: usize,
+    }
+
+    impl Widget for ImageWidget {
+        fn draw(&mut self, context: &mut OffscreenCanvas) {
+            if let Some(color) = self.color.as_ref() {
+                let rect = offscreen_canvas::Rect::from(
+                    self.position.left,
+                    self.position.top,
+                    self.position.width(),
+                    self.position.height(),
+                );
+                context.fill_rect(rect, Rgba(*color));
+            }else {
+                if self.frame_index >= self.image_data.frames.len(){
+                    self.frame_index = self.image_data.frames.len()-1;
+                }
+                let image = RgbaImage::from_raw(
+                    self.image_data.width,
+                    self.image_data.height,
+                    self.image_data.frames[self.frame_index].clone(),
+                ).unwrap_or(RgbaImage::new(30, 30));
+                let src =
+                    offscreen_canvas::Rect::new(0, 0, image.width() as i32, image.height() as i32);
+                let pos = offscreen_canvas::Rect::from(
+                    self.position.left,
+                    self.position.top,
+                    self.position.width(),
+                    self.position.height(),
+                );
+
+                if self.rotation == 0.{
+                    //不旋转
+                    context.draw_image_with_src_and_dst(&image, &src, &pos, FilterType::Nearest);
+                }else{
+                    let option = RotateOption::from(
+                        (
+                            self.position.width() as f32 / 2.,
+                            self.position.height() as f32 / 2.,
+                        ),
+                        degrees_to_radians(self.rotation),
+                    );
+                    context.draw_image_with_src_and_dst_and_rotation(&image, &src, &pos, option);
+                }
+                self.frame_index += 1;
+                if self.frame_index >= self.image_data.frames.len() {
+                    self.frame_index = 0;
+                }
+            }
+        }
+
+        fn id(&self) -> &str {
+            &self.id
+        }
+
+        fn position_mut(&mut self) -> &mut Rect {
+            &mut self.position
+        }
+
+        fn type_name(&self) -> &str {
+            &self.type_name
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn position(&self) -> &Rect {
+            &self.position
+        }
+
+        fn index(&self) -> usize {
+            self.num_widget_index
+        }
+
+        fn set_index(&mut self, idx: usize) {
+            self.num_widget_index = idx;
+        }
+
+        fn num_widget(&self) -> usize {
+            self.num_widget
+        }
+
+        fn set_num_widget(&mut self, num: usize) {
+            self.num_widget = num;
+        }
+    }
 }

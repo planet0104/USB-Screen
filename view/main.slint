@@ -25,6 +25,7 @@ export component CanvasEditor inherits Window{
         {name: "pointer",  icon: @image-url("../images/icon_pointer.png"), text: "指针" },
         {name: "text", icon: @image-url("../images/icon_text.png"), text: "文本" },
         {name: "images", icon: @image-url("../images/icon_photo.png"), text: "图像" },
+        {name: "webcam", icon: @image-url("../images/icon_webcam.png"), text: "摄像头" },
         {name: "memory", icon: @image-url("../images/icon_ram.png"), text: "内存" },
         {name: "memory_total", icon: @image-url("../images/icon_ram.png"), text: "总内存" },
         {name: "memory_percent", icon: @image-url("../images/icon_ram.png"), text: "内存%" },
@@ -250,6 +251,7 @@ export component CanvasEditor inherits Window{
                             AButton {height: 26px; width: 95px; icon-opacity: 0.8; text-color: #bbf; icon-colorize: #bbf; use-icon: true; icon: @image-url("../images/icon_font.png"); border-color: #444; text: font-name; clicked => { open_font() } }
                             Span10px {}
                             ComboBox {
+                                width: 135px;
                                 height: self.preferred-height*1.8;
                                 model: ["刷新率:1帧/秒", "刷新率:2帧/秒", "刷新率:3帧/秒", "刷新率:4帧/秒", "刷新率:5帧/秒", "刷新率:10帧/秒", "刷新率:15帧/秒"];
                                 current-value <=> fps;
@@ -259,9 +261,7 @@ export component CanvasEditor inherits Window{
                                 }
                             }
                             Span10px {}
-                            Span10px {}
-                            Text { text: "预览:"; }
-                            Span10px {}
+                            Text { text: "预览:";}
                             ComboBox {
                                 height: self.preferred-height*1.8;
                                 model <=> device_list;
@@ -364,7 +364,12 @@ export component CanvasEditor inherits Window{
                                             width: 14px;
                                             height: 14px;
                                         }
-                                        if item.type_name != "images" : Image{
+                                        if item.type_name == "webcam" : Image{
+                                            source:  @image-url("../images/icon_webcam.png");
+                                            width: 14px;
+                                            height: 14px;
+                                        }
+                                        if item.type_name != "images" && item.type_name != "webcam" : Image{
                                             source:  item.uuid == active_widget_uuid? @image-url("../images/icon_text_blue.png"): @image-url("../images/icon_text.png");
                                             width: 14px;
                                             height: 14px;
@@ -414,7 +419,7 @@ export component CanvasEditor inherits Window{
                                 Text { text: ","; width: 8px; }
                                 LineEdit { width: 40px; height: 20px; text <=> active_widget_y; input-type: number; edited => { update-widget-position() } }
                             }
-                            if active_widget_type_name == "images" : HorizontalBox {
+                            if active_widget_type_name == "images" || active_widget_type_name == "webcam" : HorizontalBox {
                                 padding-top: 5px;
                                 padding-bottom: 0px;
                                 Text { text: "大小:"; width: 40px; }
@@ -428,25 +433,25 @@ export component CanvasEditor inherits Window{
                                 Text { text: "旋转:"; width: 40px; }
                                 LineEdit { width: 30px; height: 20px; text <=> active_widget_rotation; input-type: number; edited => { update-widget-position() } }
                             }
-                            if active_widget_type_name != "images" : HorizontalBox {
+                            if active_widget_type_name != "images" && active_widget_type_name != "webcam" : HorizontalBox {
                                 padding-top: 5px;
                                 padding-bottom: 0px;
                                 Text { text: "标签:"; width: 40px; }
                                 LineEdit { height: 20px; text <=> active_widget_prefix; input-type: text; edited => { update-widget-text() } }
                             }
-                            if active_widget_type_name != "images" : HorizontalBox {
+                            if active_widget_type_name != "images" && active_widget_type_name != "webcam" : HorizontalBox {
                                 padding-top: 5px;
                                 padding-bottom: 0px;
                                 Text { text: "文本:"; width: 40px; }
                                 LineEdit { height: 20px; text <=> active_widget_text; input-type: text; edited => { update-widget-text() } }
                             }
-                            if active_widget_type_name != "images" : HorizontalBox {
+                            if active_widget_type_name != "images" && active_widget_type_name != "webcam" : HorizontalBox {
                                 padding-top: 5px;
                                 padding-bottom: 0px;
                                 Text { text: "字号:"; width: 40px; }
                                 LineEdit { width: 30px; height: 20px; text <=> active_widget_font_size; input-type: text; edited => { update-widget-text() } }
                             }
-                            if active_widget_type_name != "images" : HorizontalBox {
+                            if active_widget_type_name != "images" && active_widget_type_name != "webcam" : HorizontalBox {
                                 padding-top: 5px;
                                 padding-bottom: 0px;
                                 Text { text: "颜色:"; width: 40px; }
@@ -575,6 +580,22 @@ export component CanvasEditor inherits Window{
                                 }
                                 Rectangle { width: 5px; }
                                 AButton { text: "修改..."; width:65px; height: 26px; clicked => { update-widget-image() } }
+                            }
+                            if active_widget_type_name == "webcam" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "相机编号:"; width: 40px; }
+                                Rectangle { width: 5px; }
+                                ComboBox {
+                                    width: self.preferred-width*1.2;
+                                    height: self.preferred-height*1.5;
+                                    model: ["0", "1", "2", "3", "4", "5"];
+                                    current-value: active_widget_tag1;
+                                    selected => {
+                                        active_widget_tag1 = self.current-index;
+                                        update-widget-tags()
+                                    }
+                                }
                             }
                         }
                     }

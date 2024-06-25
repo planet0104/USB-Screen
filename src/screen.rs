@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    monitor,
+    monitor::{self, WebcamInfo},
     nmc::CITIES,
     widgets::{ImageWidget, SaveableWidget, TextWidget, Widget},
 };
@@ -10,6 +10,7 @@ use bincode::{Decode, Encode};
 use log::info;
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use offscreen_canvas::{Font, FontSettings, OffscreenCanvas, BLACK};
+use serde::{Deserialize, Serialize};
 
 pub static DEFAULT_FONT: &[u8] = include_bytes!("../fonts/VonwaonBitmap-16px.ttf");
 
@@ -20,18 +21,8 @@ pub struct ScreenSize {
     pub height: u32,
 }
 
-#[derive(Clone, Encode, Decode)]
+#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
 pub struct SaveableScreen {
-    pub width: u32,
-    pub height: u32,
-    pub model: String,
-    pub widgets: Vec<SaveableWidget>,
-    pub font: Option<Vec<u8>>,
-    pub font_name: String,
-}
-
-#[derive(Clone, Encode, Decode)]
-pub struct SaveableScreenV2 {
     pub width: u32,
     pub height: u32,
     pub model: String,
@@ -42,6 +33,16 @@ pub struct SaveableScreenV2 {
     pub widgets: Vec<SaveableWidget>,
     pub font: Option<Vec<u8>>,
     pub font_name: String
+}
+
+#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+pub struct SaveableScreenV10 {
+    pub width: u32,
+    pub height: u32,
+    pub model: String,
+    pub widgets: Vec<super::widgets::v10::SaveableWidget>,
+    pub font: Option<Vec<u8>>,
+    pub font_name: String,
 }
 
 pub struct ScreenRender {
@@ -99,6 +100,16 @@ impl ScreenRender {
             match widget.type_name() {
                 "memory" | "memory_total" | "memory_percent" | "swap" | "swap_percent" => {
                     monitor::watch_memory(true)?
+                }
+                "webcam" =>{
+                    if let Some(widget) = widget.as_any_mut().downcast_mut::<ImageWidget>() {
+                        monitor::watch_webcam(Some(WebcamInfo{
+                            width: self.width,
+                            height: self.height,
+                            index: widget.tag1.as_ref().unwrap_or(&String::new()).parse().unwrap_or(0),
+                            fps: self.fps as u32
+                        }))?
+                    }
                 }
                 "cpu" | "cpu_usage" => monitor::watch_cpu(true)?,
                 "cpu_freq" => monitor::watch_cpu_clock_speed(true)?,
@@ -163,7 +174,7 @@ impl ScreenRender {
             return None;
         }
 
-        let widget: Box<dyn Widget> = if type_name == "images" {
+        let widget: Box<dyn Widget> = if type_name == "images" || type_name == "webcam" {
             Box::new(ImageWidget::new(x, y, &type_name))
         } else {
             let mut text_index = 1;
@@ -208,10 +219,11 @@ impl ScreenRender {
         self.canvas.height()
     }
 
+    //尝试使用bindcode解析老版本screen文件
     pub fn load_from_file(&mut self, file: PathBuf) -> Result<()> {
         let compressed = std::fs::read(file)?;
         let uncompressed = decompress_size_prepended(&compressed)?;
-        let saveable: Result<(SaveableScreen, usize), bincode::error::DecodeError> =
+        let saveable: Result<(SaveableScreenV10, usize), bincode::error::DecodeError> =
             bincode::decode_from_slice(&uncompressed, bincode::config::standard());
 
         //解析失败尝试使用V2解析
@@ -231,21 +243,23 @@ impl ScreenRender {
         self.widgets.clear();
         for w in saveable.widgets {
             match w {
-                SaveableWidget::TextWidget(txt) => {
+                crate::widgets::v10::SaveableWidget::TextWidget(txt) => {
                     self.widgets.push(Box::new(txt));
                 }
-                SaveableWidget::ImageWidget(img) => {
-                    self.widgets.push(Box::new(img));
+                crate::widgets::v10::SaveableWidget::ImageWidget(img) => {
+                    self.widgets.push(Box::new(ImageWidget::from_v10(img)));
                 }
             }
         }
         Ok(())
     }
 
+    //使用json解析screen文件
     pub fn load_from_file_v2(&mut self, uncompressed: &[u8]) -> Result<()> {
-        let saveable: Result<(SaveableScreenV2, usize), bincode::error::DecodeError> =
-            bincode::decode_from_slice(&uncompressed, bincode::config::standard());
-        let (saveable, _) = saveable?;
+        let saveable:SaveableScreen = serde_json::from_str(&String::from_utf8(uncompressed.to_vec())?)?;
+        // let saveable: Result<(SaveableScreen, usize), bincode::error::DecodeError> =
+        //     bincode::decode_from_slice(&uncompressed, bincode::config::standard());
+        // let (saveable, _) = saveable?;
         self.width = saveable.width;
         self.height = saveable.height;
         self.fps = saveable.fps;
@@ -271,7 +285,7 @@ impl ScreenRender {
 
     pub fn new_from_file(file: &[u8]) -> Result<ScreenRender> {
         let uncompressed = decompress_size_prepended(&file)?;
-        let saveable: Result<(SaveableScreen, usize), bincode::error::DecodeError> =
+        let saveable: Result<(SaveableScreenV10, usize), bincode::error::DecodeError> =
             bincode::decode_from_slice(&uncompressed, bincode::config::standard());
         if saveable.is_err(){
             return Self::new_from_file_v2(&uncompressed);
@@ -286,11 +300,11 @@ impl ScreenRender {
         render.widgets.clear();
         for w in saveable.widgets {
             match w {
-                SaveableWidget::TextWidget(txt) => {
+                crate::widgets::v10::SaveableWidget::TextWidget(txt) => {
                     render.widgets.push(Box::new(txt));
                 }
-                SaveableWidget::ImageWidget(img) => {
-                    render.widgets.push(Box::new(img));
+                crate::widgets::v10::SaveableWidget::ImageWidget(img) => {
+                    render.widgets.push(Box::new(ImageWidget::from_v10(img)));
                 }
             }
         }
@@ -298,10 +312,8 @@ impl ScreenRender {
     }
 
     pub fn new_from_file_v2(uncompressed: &[u8]) -> Result<ScreenRender> {
-        let saveable: Result<(SaveableScreenV2, usize), bincode::error::DecodeError> =
-            bincode::decode_from_slice(&uncompressed, bincode::config::standard());
-        
-        let (saveable, _) = saveable?;
+        let saveable:SaveableScreen = serde_json::from_str(&String::from_utf8(uncompressed.to_vec())?)?;
+
         let model = saveable.model;
         let mut render =
             ScreenRender::new(model, saveable.width, saveable.height, None, String::new())?;
@@ -324,13 +336,19 @@ impl ScreenRender {
         Ok(render)
     }
 
-    pub fn to_bytes(&mut self) -> Result<Vec<u8>> {
-        let mut saveable = SaveableScreenV2 {
+    //改为json格式存储，这样添加了新的字段不影响解析原有格式的screen文件
+    pub fn to_json(&mut self) -> Result<Vec<u8>> {
+        let mut font = self.font.clone();
+        let font_name = self.font_name.clone();
+        if font_name == "凤凰点阵"{
+            font = None;
+        }
+        let mut saveable = SaveableScreen {
             width: self.width,
             height: self.height,
             model: self.model.clone(),
-            font: self.font.clone(),
-            font_name: self.font_name.clone(),
+            font,
+            font_name,
             widgets: vec![],
             fps: self.fps,
             device_address: self.device_address.clone()
@@ -347,10 +365,11 @@ impl ScreenRender {
                     .push(SaveableWidget::ImageWidget(widget.clone()));
             }
         }
-        let contents = bincode::encode_to_vec(&saveable, bincode::config::standard())?;
+        let json = serde_json::to_string(&saveable)?;
+        let contents = json.as_bytes();
         info!("压缩前:{}k", contents.len() / 1024);
         //压缩
-        let compressed = compress_prepend_size(&contents);
+        let compressed = compress_prepend_size(contents);
         info!("压缩后:{}k", compressed.len() / 1024);
         Ok(compressed)
     }

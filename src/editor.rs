@@ -133,7 +133,7 @@ impl CanvasEditorContext {
         let device_list = Rc::new(VecModel::from(
             self.devices
                 .iter()
-                .map(|dev| format!("{}", dev.label).into())
+                .map(|dev| format!("{} {}x{}", dev.label, dev.width, dev.height).into())
                 .collect::<Vec<SharedString>>(),
         ));
         if self.devices.len() == 0{
@@ -151,7 +151,9 @@ impl CanvasEditorContext {
         }
 
         if dev_index == -1 && self.devices.len()>0{
-            app.set_device_name(self.devices[0].label.clone().into());
+            let dev = &self.devices[0];
+            dev_index = 0;
+            app.set_device_name(format!("{} {}x{}", dev.label, dev.width, dev.height).into());
         }
 
         if self.devices.len() == 0{
@@ -172,7 +174,7 @@ impl CanvasEditorContext {
                             screen.replace(CurrentUsbScreen { info: dev.clone(), screen: s });
                         }
                         Err(err) => {
-                            println!("屏幕打开失败:{:?}", err);
+                            error!("屏幕打开失败:{:?}", err);
                         }
                     }
                 }
@@ -494,52 +496,59 @@ impl CanvasEditorContext {
         let app = self.app.unwrap();
         let tag1 = app.get_active_widget_tag1();
         let tag2 = app.get_active_widget_tag2();
-        let widget = match self
+        
+        if let Some(widget) = self.active_widget()
+            .and_then(|w| w.as_any_mut().downcast_mut::<ImageWidget>())
+        {
+            if widget.is_webcam(){
+                //更新摄像头
+                widget.tag1 = Some(tag1.to_string());
+            }
+        }
+
+        if let Some(widget) = self
             .active_widget()
             .and_then(|w| w.as_any_mut().downcast_mut::<TextWidget>())
         {
-            None => return,
-            Some(v) => v,
-        };
+            widget.tag1 = tag1.to_string();
 
-        widget.tag1 = tag1.to_string();
-
-        //更新天气
-        if widget.type_name == "weather" {
-            let city_name = tag2.to_string();
-            //查询城市名称
-            if city_name.trim().len() > 0 {
-                let mut find_city = None;
-                for city in CITIES.iter() {
-                    if city.city.contains(city_name.as_str()) {
-                        find_city = Some(city.clone());
-                        break;
-                    }
-                }
-
-                if let Some(city) = find_city {
-                    widget.tag2 = city.city.clone();
-                    self.app
-                        .unwrap()
-                        .set_active_widget_tag2(city.city.clone().into());
-                    let _ = self.screen.setup_monitor();
-                    //更新所有日期组件的tag2
-                    for w in self.screen.widgets.iter_mut() {
-                        if let Some(widget) = w.as_any_mut().downcast_mut::<TextWidget>() {
-                            widget.tag2 = city.city.clone();
+            //更新天气
+            if widget.type_name == "weather" {
+                let city_name = tag2.to_string();
+                //查询城市名称
+                if city_name.trim().len() > 0 {
+                    let mut find_city = None;
+                    for city in CITIES.iter() {
+                        if city.city.contains(city_name.as_str()) {
+                            find_city = Some(city.clone());
+                            break;
                         }
                     }
-                    //刷新ui
-                    self.refresh_model_text();
-                    self.app.unwrap().set_active_widget_tag2(city.city.into());
+    
+                    if let Some(city) = find_city {
+                        widget.tag2 = city.city.clone();
+                        self.app
+                            .unwrap()
+                            .set_active_widget_tag2(city.city.clone().into());
+                        let _ = self.screen.setup_monitor();
+                        //更新所有日期组件的tag2
+                        for w in self.screen.widgets.iter_mut() {
+                            if let Some(widget) = w.as_any_mut().downcast_mut::<TextWidget>() {
+                                widget.tag2 = city.city.clone();
+                            }
+                        }
+                        //刷新ui
+                        self.refresh_model_text();
+                        self.app.unwrap().set_active_widget_tag2(city.city.into());
+                    }
                 }
+    
+                self.app.unwrap().set_active_widget_tag1(tag1);
+            } else {
+                //更新文字、进度条类型
+                widget.tag2 = tag2.to_string();
+                self.app.unwrap().set_active_widget_tag2(tag2);
             }
-
-            self.app.unwrap().set_active_widget_tag1(tag1);
-        } else {
-            //更新文字、进度条类型
-            widget.tag2 = tag2.to_string();
-            self.app.unwrap().set_active_widget_tag2(tag2);
         }
     }
 
@@ -744,7 +753,7 @@ impl CanvasEditorContext {
         let mut text = "".to_string();
         let mut prefix = "".to_string();
         if let Some((idx, w)) = self.screen.find_widget(&uuid) {
-            if w.type_name() != "images" {
+            if w.is_text() {
                 if let Some(widget) = w.as_any_mut().downcast_mut::<TextWidget>() {
                     text = widget.text.to_string();
                     prefix = widget.prefix.to_string();
@@ -753,11 +762,7 @@ impl CanvasEditorContext {
 
             let model = WidgetObject {
                 index: idx as i32,
-                name: SharedString::from(if w.type_name() == "images" {
-                    "图像"
-                } else {
-                    "文本"
-                }),
+                name: SharedString::from(w.get_label()),
                 type_name: SharedString::from(w.type_name()),
                 uuid: SharedString::from(w.id()),
                 text: SharedString::from(&text),
@@ -794,7 +799,7 @@ impl CanvasEditorContext {
         for (idx, w) in self.screen.widgets.iter_mut().rev().enumerate() {
             let mut text = "".to_string();
             let mut prefix = "".to_string();
-            if w.type_name() != "images" {
+            if w.is_text() {
                 if let Some(widget) = w.as_any_mut().downcast_mut::<TextWidget>() {
                     text = widget.text.to_string();
                     prefix = widget.prefix.to_string();
@@ -811,11 +816,7 @@ impl CanvasEditorContext {
 
             let model = WidgetObject {
                 index: idx as i32,
-                name: SharedString::from(if w.type_name() == "images" {
-                    "图像"
-                } else {
-                    "文本"
-                }),
+                name: SharedString::from(w.get_label()),
                 type_name: SharedString::from(w.type_name()),
                 uuid: SharedString::from(w.id()),
                 text: SharedString::from(&text),
@@ -960,11 +961,7 @@ impl CanvasEditorContext {
 
             let model = WidgetObject {
                 index: idx as i32,
-                name: SharedString::from(if w.type_name() == "images" {
-                    "图像"
-                } else {
-                    "文本"
-                }),
+                name: SharedString::from(w.get_label()),
                 type_name: SharedString::from(w.type_name()),
                 uuid: SharedString::from(w.id()),
                 text: SharedString::from(&text),
@@ -1071,7 +1068,7 @@ impl CanvasEditorContext {
 
         //修改元素大小
         for idx in 0..self.screen.widgets.len() {
-            if self.screen.widgets[idx].type_name() != "images" {
+            if self.screen.widgets[idx].is_text() {
                 if let Some(widget) = self.screen.widgets[idx]
                     .as_any_mut()
                     .downcast_mut::<TextWidget>()
@@ -1093,7 +1090,7 @@ impl CanvasEditorContext {
                     }
                 }
             }
-            if self.screen.widgets[idx].type_name() == "images" {
+            if !self.screen.widgets[idx].is_text() {
                 if let Some(widget) = self.screen.widgets[idx]
                     .as_any_mut()
                     .downcast_mut::<ImageWidget>()
@@ -1118,6 +1115,8 @@ impl CanvasEditorContext {
         .into());
         app.set_screen_width(screen.width as f32);
         app.set_screen_height(screen.height as f32);
+        //刷新监听器
+        let _ = self.screen.setup_monitor();
     }
 
     fn on_save_screen(&mut self) {
@@ -1137,7 +1136,7 @@ impl CanvasEditorContext {
             self.screen.device_address = None;
         }
         
-        match self.screen.to_bytes() {
+        match self.screen.to_json() {
             Ok(file_data) => {
                 let file_name = format!("{}x{}.screen", self.screen.width, self.screen.height);
                 std::thread::spawn(move || {
@@ -1188,7 +1187,7 @@ impl CanvasEditorContext {
                     for idx in 0..self.screen.widgets.len() {
                         let mut text = "".to_string();
                         let mut prefix = "".to_string();
-                        if self.screen.widgets[idx].type_name() != "images" {
+                        if self.screen.widgets[idx].is_text() {
                             if let Some(widget) = self.screen.widgets[idx]
                                 .as_any_mut()
                                 .downcast_mut::<TextWidget>()
@@ -1200,13 +1199,7 @@ impl CanvasEditorContext {
 
                         let model = WidgetObject {
                             index: idx as i32,
-                            name: SharedString::from(
-                                if self.screen.widgets[idx].type_name() == "images" {
-                                    "图像"
-                                } else {
-                                    "文本"
-                                },
-                            ),
+                            name: SharedString::from(self.screen.widgets[idx].get_label()),
                             type_name: SharedString::from(self.screen.widgets[idx].type_name()),
                             uuid: SharedString::from(self.screen.widgets[idx].id()),
                             text: SharedString::from(&text),
@@ -1370,14 +1363,14 @@ impl CanvasEditorContext {
     }
 
     fn on_change_device(&mut self, device: SharedString) {
-        println!("on_change_device: {}", device.as_str());
+        info!("on_change_device: {}", device.as_str());
         let devices = self.devices.clone();
         std::thread::spawn(move ||{
             for dev in devices{
-                if dev.label == device.as_str(){
+                if device.as_str().contains(&dev.label){
                     if let Ok(mut screen) = SCREEN.lock(){
                         if screen.is_some() && screen.as_ref().unwrap().info.label == dev.label{
-                            println!("已经打开屏幕:{}", dev.label);
+                            info!("已经打开屏幕:{}", dev.label);
                             return;
                         }
                         match UsbScreen::open(dev.clone()){
@@ -1385,7 +1378,7 @@ impl CanvasEditorContext {
                                 screen.replace(CurrentUsbScreen { info: dev.clone(), screen: s });
                             }
                             Err(err) => {
-                                println!("屏幕打开失败:{:?}", err);
+                                error!("屏幕打开失败:{:?}", err);
                             }
                         }
                     }
@@ -1396,7 +1389,7 @@ impl CanvasEditorContext {
     }
 
     fn on_change_fps(&mut self, fps: SharedString) {
-        println!("on_change_fps {fps}");
+        info!("on_change_fps {fps}");
         let fps = fps.to_string().replace("刷新率:", "").replace("帧/秒", "");
         let mut fps = fps.parse::<i32>().unwrap_or(10);
         if self.screen.width > 160 && self.screen.height > 128{
@@ -1406,6 +1399,8 @@ impl CanvasEditorContext {
             }
         }
         self.fps = fps;
+        self.screen.fps = fps;
+        let _ = self.screen.setup_monitor();
         let app = self.app.unwrap();
         app.set_fps(format!("刷新率:{fps}帧/秒").into());
     }
@@ -1425,7 +1420,7 @@ pub fn run() -> Result<()> {
     let timer = Timer::default();
     timer.start(
         TimerMode::Repeated,
-        std::time::Duration::from_millis(66),
+        std::time::Duration::from_millis(40),
         move || {
             context_clone.borrow_mut().render_screen();
         },
