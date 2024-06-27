@@ -1,14 +1,16 @@
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{path::Path, process::Command, time::{Duration, Instant}};
 
 use anyhow::{anyhow, Result};
 use image::{buffer::ConvertBuffer, RgbImage};
 use log::{error, info};
+#[cfg(feature = "editor")]
 use tao::event_loop::ControlFlow;
 use usb_screen::find_and_open_a_screen;
 
 use crate::screen::ScreenRender;
+#[cfg(feature = "editor")]
 mod editor;
 mod monitor;
 mod nmc;
@@ -23,30 +25,34 @@ fn main() -> Result<()> {
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .try_init();
-    info!("editor start!");
 
-    #[cfg(not(debug_assertions))]
-    {
-        let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = std::env::args().skip(1).collect();
 
-        let screen_file = match args.len() {
-            0 => read_screen_file(),
-            1 => Some(args[0].to_string()),
-            _ => None,
-        };
+    let screen_file = match args.len() {
+        0 => read_screen_file(),
+        1 => Some(args[0].to_string()),
+        _ => None,
+    };
 
-        info!("screen_file={:?}", screen_file);
+    info!("screen_file={:?}", screen_file);
 
-        if let Some(file) = screen_file {
-            if file != "editor"{
-                create_tray_icon(file)?;
-                return Ok(());
-            }
+    if let Some(file) = screen_file {
+        #[cfg(feature = "editor")]
+        if file != "editor"{
+            create_tray_icon(file)?;
+            return Ok(());
         }
+
+        #[cfg(not(feature = "editor"))]
+        create_tray_icon(file)?;
     }
 
-    editor::run()?;
-    monitor::clean();
+    #[cfg(feature = "editor")]
+    {
+        info!("editor start!");
+        editor::run()?;
+        monitor::clean();
+    }
     Ok(())
 }
 
@@ -89,73 +95,84 @@ fn open_usb_screen(file: String) -> Result<()>{
 }
 
 fn create_tray_icon(file: String) -> Result<()> {
-    std::thread::spawn(move ||{
+
+    #[cfg(not(feature = "editor"))]
+    {
         let ret = open_usb_screen(file);
         error!("{:?}", ret);
-    });
+        return Ok(());
+    }
 
-    // 图标必须运行在UI线程上
-    let event_loop = tao::event_loop::EventLoopBuilder::new().build();
-
-    let tray_menu = Box::new(tray_icon::menu::Menu::new());
-    let quit_i = tray_icon::menu::MenuItem::new("退出", true, None);
-    let editor_i = tray_icon::menu::MenuItem::new("编辑器", true, None);
-    let _ = tray_menu.append(&quit_i);
-    let _ = tray_menu.append(&editor_i);
-    let mut tray_icon = None;
-    let mut menu_channel = None;
-
-    event_loop.run(move |event, _, control_flow| {
-        // We add delay of 16 ms (60fps) to event_loop to reduce cpu load.
-        // This can be removed to allow ControlFlow::Poll to poll on each cpu cycle
-        // Alternatively, you can set ControlFlow::Wait or use TrayIconEvent::set_event_handler,
-        // see https://github.com/tauri-apps/tray-icon/issues/83#issuecomment-1697773065
-        *control_flow = ControlFlow::WaitUntil(
-            std::time::Instant::now() + std::time::Duration::from_millis(16),
-        );
-
-        if let tao::event::Event::NewEvents(tao::event::StartCause::Init) = event {
-            //创建图标
-            let icon = image::load_from_memory(include_bytes!("../images/monitor.png")).unwrap().to_rgba8();
-            let (width, height) = icon.dimensions();
-            
-            
-            if let Ok(icon) = tray_icon::Icon::from_rgba(icon.into_raw(), width, height){
-                if let Ok(i) = tray_icon::TrayIconBuilder::new()
-                .with_tooltip("USB Screen")
-                .with_menu(tray_menu.clone())
-                .with_icon(icon)
-                .build(){
-                    tray_icon = Some(i);
-                    menu_channel = Some(tray_icon::menu::MenuEvent::receiver());
+    #[cfg(feature = "editor")]
+    {
+        std::thread::spawn(move ||{
+            let ret = open_usb_screen(file);
+            error!("{:?}", ret);
+        });
+    
+        // 图标必须运行在UI线程上
+        let event_loop = tao::event_loop::EventLoopBuilder::new().build();
+    
+        let tray_menu = Box::new(tray_icon::menu::Menu::new());
+        let quit_i = tray_icon::menu::MenuItem::new("退出", true, None);
+        let editor_i = tray_icon::menu::MenuItem::new("编辑器", true, None);
+        let _ = tray_menu.append(&quit_i);
+        let _ = tray_menu.append(&editor_i);
+        let mut tray_icon = None;
+        let mut menu_channel = None;
+    
+        event_loop.run(move |event, _, control_flow| {
+            // We add delay of 16 ms (60fps) to event_loop to reduce cpu load.
+            // This can be removed to allow ControlFlow::Poll to poll on each cpu cycle
+            // Alternatively, you can set ControlFlow::Wait or use TrayIconEvent::set_event_handler,
+            // see https://github.com/tauri-apps/tray-icon/issues/83#issuecomment-1697773065
+            *control_flow = ControlFlow::WaitUntil(
+                std::time::Instant::now() + std::time::Duration::from_millis(16),
+            );
+    
+            if let tao::event::Event::NewEvents(tao::event::StartCause::Init) = event {
+                //创建图标
+                let icon = image::load_from_memory(include_bytes!("../images/monitor.png")).unwrap().to_rgba8();
+                let (width, height) = icon.dimensions();
+                
+                
+                if let Ok(icon) = tray_icon::Icon::from_rgba(icon.into_raw(), width, height){
+                    if let Ok(i) = tray_icon::TrayIconBuilder::new()
+                    .with_tooltip("USB Screen")
+                    .with_menu(tray_menu.clone())
+                    .with_icon(icon)
+                    .build(){
+                        tray_icon = Some(i);
+                        menu_channel = Some(tray_icon::menu::MenuEvent::receiver());
+                    }
+                }
+    
+                // We have to request a redraw here to have the icon actually show up.
+                // Tao only exposes a redraw method on the Window so we use core-foundation directly.
+                #[cfg(target_os = "macos")]
+                unsafe {
+                    use core_foundation::runloop::{CFRunLoopGetMain, CFRunLoopWakeUp};
+    
+                    let rl = CFRunLoopGetMain();
+                    CFRunLoopWakeUp(rl);
                 }
             }
-
-            // We have to request a redraw here to have the icon actually show up.
-            // Tao only exposes a redraw method on the Window so we use core-foundation directly.
-            #[cfg(target_os = "macos")]
-            unsafe {
-                use core_foundation::runloop::{CFRunLoopGetMain, CFRunLoopWakeUp};
-
-                let rl = CFRunLoopGetMain();
-                CFRunLoopWakeUp(rl);
-            }
-        }
-
-        if let (Some(_tray_icon), Some(menu_channel)) = (tray_icon.as_mut(), menu_channel.as_mut()){
-            if let Ok(event) = menu_channel.try_recv() {
-                if event.id == quit_i.id() {
-                    *control_flow = ControlFlow::Exit;
-                }else if event.id == editor_i.id() {
-                    //启动自身
-                    if let Ok(_) = run_as_editor(){
-                        //退出托盘
+    
+            if let (Some(_tray_icon), Some(menu_channel)) = (tray_icon.as_mut(), menu_channel.as_mut()){
+                if let Ok(event) = menu_channel.try_recv() {
+                    if event.id == quit_i.id() {
                         *control_flow = ControlFlow::Exit;
+                    }else if event.id == editor_i.id() {
+                        //启动自身
+                        if let Ok(_) = run_as_editor(){
+                            //退出托盘
+                            *control_flow = ControlFlow::Exit;
+                        }
                     }
                 }
             }
-        }
-    });
+        });
+    }
 }
 
 fn read_screen_file() -> Option<String> {

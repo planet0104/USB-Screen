@@ -129,7 +129,16 @@ impl CanvasEditorContext {
     }
 
     pub fn update_device_list(&mut self){
-        self.devices = usb_screen::find_all_device();
+        let connected_device: &[&UsbScreenInfo] = if let Ok(screen) = SCREEN.lock(){
+            if let Some(device) = screen.as_ref(){
+                &[&device.info.clone()]
+            }else{
+                &[]
+            }
+        }else{
+            &[]
+        };
+        self.devices = usb_screen::find_all_device(connected_device);
         let device_list = Rc::new(VecModel::from(
             self.devices
                 .iter()

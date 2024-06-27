@@ -17,6 +17,7 @@
         "MJPEG",
         "nheight",
         "NOCLOSEPROCESS",
+        "nusb",
         "nwidth",
         "PCSTR",
         "psutil",

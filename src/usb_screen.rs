@@ -1,15 +1,19 @@
+use std::{io::Write, time::Duration};
+
 use futures_lite::future::block_on;
 use image::{Rgb, RgbImage};
+use log::{error, info, warn};
 use nusb::Interface;
 use anyhow::{anyhow, Result};
-use serialport::{SerialPort, SerialPortInfo, SerialPortType};
+#[cfg(feature = "usb-serial")]
+use serial2::SerialPort;
 
 use crate::rgb565::rgb888_to_rgb565_be;
 
 const BULK_OUT_EP: u8 = 0x01;
 const BULK_IN_EP: u8 = 0x81;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UsbScreenInfo{
     pub label: String,
     pub address: String,
@@ -19,7 +23,8 @@ pub struct UsbScreenInfo{
 
 pub enum UsbScreen{
     USBRaw((UsbScreenInfo, Interface)),
-    USBSerail((UsbScreenInfo, Box<dyn SerialPort>))
+    #[cfg(feature = "usb-serial")]
+    USBSerial((UsbScreenInfo, SerialPort))
 }
 
 impl UsbScreen{
@@ -32,9 +37,10 @@ impl UsbScreen{
                 }
             }
 
-            UsbScreen::USBSerail((info, port)) => {
+            #[cfg(feature = "usb-serial")]
+            UsbScreen::USBSerial((info, port)) => {
                 if img.width() <= info.width as u32 && img.height() <= info.height as u32{
-                    let _ = draw_rgb_image_serial(x, y, img, port.as_mut());
+                    let _ = draw_rgb_image_serial(x, y, img, port);
                 }
             }
         }
@@ -49,15 +55,21 @@ impl UsbScreen{
             Ok(Self::USBRaw((info, open_usb_raw_device(&addr)?)))
         }else{
             //USB串口设备, addr是串口名称
-            let screen = serialport::new(&info.address, 115_200).open()?;
-            Ok(Self::USBSerail((info, screen)))
+            #[cfg(feature = "usb-serial")]
+            {
+                let screen = SerialPort::open(&info.address, 115200)?;
+                Ok(Self::USBSerial((info, screen)))
+            }
+
+            #[cfg(not(feature = "usb-serial"))]
+            Err(anyhow!("不是USB Raw设备"))
         }
     }
 }
 
 pub fn find_and_open_a_screen() -> Option<UsbScreen>{
     //先查找串口设备
-    let devices = find_all_device();
+    let devices = find_all_device(&[]);
     for info in devices{
         if let Ok(screen) = UsbScreen::open(info){
             return Some(screen);
@@ -81,7 +93,7 @@ pub fn open_usb_raw_device(device_address: &str) -> Result<Interface>{
 // 查询所有USB屏幕设备
 // 对于USB Raw返回的第2个参数是 device_address
 // 对于USB Serial, 返回的第2个参数是串口名称
-pub fn find_all_device() -> Vec<UsbScreenInfo>{
+pub fn find_all_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenInfo>{
     let mut devices = vec![];
     if let Ok(di) = nusb::list_devices(){
         for d in di{
@@ -105,40 +117,78 @@ pub fn find_all_device() -> Vec<UsbScreenInfo>{
         }
     }
     // println!("USB Raw设备数量:{}", devices.len());
-    if let Ok(serial_devices) = find_usb_serial_device(){
-        // println!("USB Serial 设备数量:{}", serial_devices.len());
-        for (dev, serial_number) in serial_devices{
-            let label = format!("USB {}", dev.port_name);
-            let address = format!("{}", dev.port_name);
-            //从串号中读取屏幕大小
-            let screen_size = &serial_number[6..serial_number.find(";").unwrap_or(13)].to_string();
-            let screen_size = screen_size.replace("X", "x");
-            let mut arr = screen_size.split("x");
-            let width = arr.next().unwrap_or("160").parse::<u16>().unwrap_or(160);
-            let height = arr.next().unwrap_or("128").parse::<u16>().unwrap_or(128);
-            devices.push(UsbScreenInfo { label, address, width, height });
-        }
-    }
+    #[cfg(feature = "usb-serial")]
+    devices.extend_from_slice(&find_usb_serial_device(exclude_ports));
     // println!("usb 设备:{:?}", devices);
+
+    if devices.len() == 0{
+        warn!("no available device!");
+    }
+
     devices
 }
 
-pub fn find_usb_serial_device() -> Result<Vec<(SerialPortInfo, String)>>{
-    let ports: Vec<SerialPortInfo> = serialport::available_ports().unwrap_or(vec![]);
-    let mut usb_screen = vec![];
+#[cfg(feature = "usb-serial")]
+pub fn find_usb_serial_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenInfo>{
+    //读取设备信息(8字节) 串口读取信息使用
+    const READ_INF:u64 = u64::from_be_bytes(*b"ReadInfo");
+
+    #[cfg(windows)]
+    let ports = SerialPort::available_ports().unwrap_or(vec![]);
+
+    #[cfg(not(windows))]
+    let ports = list_acm_devices();
+    // info!("ports:{:?}", ports);
+    
+    let mut devices = vec![];
     for p in ports {
-        match p.port_type.clone(){
-            SerialPortType::UsbPort(port) => {
-                let serial_number = port.serial_number.unwrap_or("".to_string());
-                if serial_number.starts_with("USBSCR"){
-                    usb_screen.push((p, serial_number));
-                    continue;
+        //尝试打开串口，并读取屏幕信息
+
+        #[cfg(windows)]
+        let port_name = match p.to_str(){
+            Some(p) => p,
+            None => continue
+        };
+        #[cfg(not(windows))]
+        let port_name = &p;
+
+        for exclude_port in exclude_ports{
+            if exclude_port.address == *port_name{
+                devices.push((**exclude_port).clone());
+                continue;
+            }
+        }
+        let mut port = match SerialPort::open(port_name, 115200){
+            Ok(p) => p,
+            Err(err) => {
+                error!("port open failed:{:?}", err);
+                continue
+            }
+        };
+        let _ = port.set_read_timeout(Duration::from_millis(300));
+        let _ = port.set_write_timeout(Duration::from_micros(300));
+        let serial_number = &mut [0u8; 16];
+        for _ in 0..3{
+            let _ = port.write(&READ_INF.to_be_bytes());
+            let _ = port.flush();
+            std::thread::sleep(Duration::from_millis(10));
+            if let Ok(_) = port.read(serial_number){
+                if let Ok(serial_number) = String::from_utf8(serial_number.to_vec()){
+                    if serial_number.starts_with("USBSCR"){
+                        let screen_size = &serial_number[6..serial_number.find(";").unwrap_or(13)].to_string();
+                        let screen_size = screen_size.replace("X", "x");
+                        let mut arr = screen_size.split("x");
+                        let width = arr.next().unwrap_or("160").parse::<u16>().unwrap_or(160);
+                        let height = arr.next().unwrap_or("128").parse::<u16>().unwrap_or(128);
+                        devices.push(UsbScreenInfo { label: format!("USB {port_name}"), address: port_name.to_string(), width, height });
+                        break;
+                    }
                 }
             }
-            _ => ()
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
-    Ok(usb_screen)
+    devices
 }
 
 pub fn clear_screen(color: Rgb<u8>, interface:&Interface, width: u16, height: u16) -> anyhow::Result<()>{
@@ -149,7 +199,8 @@ pub fn clear_screen(color: Rgb<u8>, interface:&Interface, width: u16, height: u1
     draw_rgb_image(0, 0, &img, interface)
 }
 
-pub fn clear_screen_serial(color: Rgb<u8>, port:&mut dyn SerialPort, width: u16, height: u16) -> anyhow::Result<()>{
+#[cfg(feature = "usb-serial")]
+pub fn clear_screen_serial(color: Rgb<u8>, port:&mut SerialPort, width: u16, height: u16) -> anyhow::Result<()>{
     let mut img = RgbImage::new(width as u32, height as u32);
     for p in img.pixels_mut(){
         *p = color;
@@ -189,13 +240,16 @@ pub fn draw_rgb565(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, interf
     Ok(())
 }
 
-pub fn draw_rgb_image_serial(x: u16, y: u16, img:&RgbImage, port:&mut dyn SerialPort) -> anyhow::Result<()>{
+#[cfg(feature = "usb-serial")]
+pub fn draw_rgb_image_serial(x: u16, y: u16, img:&RgbImage, port:&mut SerialPort) -> anyhow::Result<()>{
     //ST7789驱动使用的是Big-Endian
     let rgb565 = rgb888_to_rgb565_be(&img, img.width() as usize, img.height() as usize);
     draw_rgb565_serial(&rgb565, x, y, img.width() as u16, img.height() as u16, port)
 }
 
-pub fn draw_rgb565_serial(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, port:&mut dyn SerialPort) -> anyhow::Result<()>{
+#[cfg(feature = "usb-serial")]
+pub fn draw_rgb565_serial(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, port:&mut SerialPort) -> anyhow::Result<()>{
+    
     let rgb565_u8_slice = lz4_flex::compress_prepend_size(rgb565);
 
     const IMAGE_AA:u64 = 7596835243154170209;
@@ -209,7 +263,7 @@ pub fn draw_rgb565_serial(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16,
     img_begin[12..14].copy_from_slice(&x.to_be_bytes());
     img_begin[14..16].copy_from_slice(&y.to_be_bytes());
     // println!("draw:{x}x{y} {width}x{height} len={}", rgb565_u8_slice.len());
-
+    
     port.write(img_begin)?;
     port.flush()?;
     port.write(&rgb565_u8_slice)?;
@@ -217,4 +271,29 @@ pub fn draw_rgb565_serial(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16,
     port.write(&IMAGE_BB.to_be_bytes())?;
     port.flush()?;
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn list_acm_devices() -> Vec<String> {
+    let dir_path = std::path::Path::new("/dev");
+    let entries = match std::fs::read_dir(dir_path){
+        Err(err) => {
+            log::error!("error list /dev/ {:?}", err);
+            return vec![];
+        }
+        Ok(e) => e
+    };
+    entries.filter_map(|entry| {
+        entry.ok().and_then(|e| {
+            let path = e.path();
+            if let Some(file_name) = path.file_name() {
+                if let Some(name) = file_name.to_str() {
+                    if name.starts_with("ttyACM") {
+                        return Some(format!("/dev/{name}"));
+                    }
+                }
+            }
+            None
+        })
+    }).collect()
 }

@@ -4,16 +4,15 @@ use chrono::{Datelike, Local};
 use fast_image_resize::{images::Image, Resizer};
 use human_repr::HumanDuration;
 use image::{DynamicImage, RgbImage};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
+#[cfg(feature = "webcam")]
 use nokhwa::{pixel_format::RgbFormat, utils::{CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution}, Camera};
 use once_cell::sync::Lazy;
 use rust_ephemeris::lunnar::SolorDate;
 use serde::{Deserialize, Serialize};
+
 use std::{
-    collections::HashMap,
-    process::Child,
-    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
-    time::{Duration, Instant, SystemTime},
+    collections::HashMap, process::Child, sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard}, time::{Duration, Instant, SystemTime}
 };
 use sysinfo::Networks;
 
@@ -393,6 +392,7 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
                     });
                 }
 
+                #[cfg(feature = "webcam")]
                 if watch_webcam {
                     try_write(|mut ctx| {
                         if ctx.watch_webcam_task.is_none() {
@@ -1018,12 +1018,13 @@ pub fn start_network_counter_thread() -> std::thread::JoinHandle<()> {
     })
 }
 
-
+#[cfg(feature = "webcam")]
 pub fn start_webcam_capture_thread() -> std::thread::JoinHandle<()> {
     debug!("start_webcam_capture_thread...");
     std::thread::spawn(move || {
 
         let mut camera:Option<Camera> = None;
+        
         let mut camera_index:i32 = -1;
         
         loop {
@@ -1059,6 +1060,7 @@ pub fn start_webcam_capture_thread() -> std::thread::JoinHandle<()> {
                 if let Some(cam) = camera.as_mut(){
                     //开始拍照
                     let t = Instant::now();
+
                     if let Ok(frame) = cam.frame(){
                         if let Ok(decoded) = frame.decode_image::<RgbFormat>(){
                             // info!("拍照大小:{}x{}", decoded.width(), decoded.height());
@@ -1107,6 +1109,7 @@ pub fn start_webcam_capture_thread() -> std::thread::JoinHandle<()> {
                             });
                         }
                     }
+
                     //延迟，减去可能花费的拍照时间
                     let dur = t.elapsed().as_millis() as u64;
                     let delay = 1000/webcam_info.fps as u64;
