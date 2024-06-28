@@ -37,6 +37,8 @@ struct CurrentUsbScreen{
 static SCREEN: Lazy<Mutex<Option<CurrentUsbScreen>>> = Lazy::new(|| {
     Mutex::new(None)
 });
+// 所有屏幕列表
+static ALL_SCREENS: Lazy<Mutex<Vec<UsbScreenInfo>>> = Lazy::new(|| Mutex::new(vec![]) );
 
 
 slint::include_modules!();
@@ -129,16 +131,10 @@ impl CanvasEditorContext {
     }
 
     pub fn update_device_list(&mut self){
-        let connected_device: &[&UsbScreenInfo] = if let Ok(screen) = SCREEN.lock(){
-            if let Some(device) = screen.as_ref(){
-                &[&device.info.clone()]
-            }else{
-                &[]
-            }
-        }else{
-            &[]
+        self.devices = match ALL_SCREENS.try_lock(){
+            Err(_err) => return,
+            Ok(list) => list.clone()
         };
-        self.devices = usb_screen::find_all_device(connected_device);
         let device_list = Rc::new(VecModel::from(
             self.devices
                 .iter()
@@ -1435,14 +1431,30 @@ pub fn run() -> Result<()> {
         },
     );
 
-    //2秒钟刷新设备列表
+    //5秒钟刷新设备列表
     let context_clone = context.clone();
     let timer = Timer::default();
     timer.start(
         TimerMode::Repeated,
-        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(6),
         move || {
             context_clone.borrow_mut().update_device_list();
+            std::thread::spawn(move ||{
+                info!("开始刷新串口列表...");
+                let connected_device: Vec<UsbScreenInfo> = if let Ok(screen) = SCREEN.lock(){
+                    if let Some(device) = screen.as_ref(){
+                        vec![device.info.clone()]
+                    }else{
+                        vec![]
+                    }
+                }else{
+                    vec![]
+                };
+                let devices = usb_screen::find_all_device(&connected_device);
+                if let  Ok(mut d) = ALL_SCREENS.lock(){
+                    *d = devices;
+                }
+            });
         }
     );
 

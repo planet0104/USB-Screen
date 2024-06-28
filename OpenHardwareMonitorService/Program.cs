@@ -33,6 +33,9 @@ namespace OpenHardwareMonitorService
         public readonly List<float> temperatures = new List<float>();
         public readonly List<float> loads = new List<float>();
         public readonly List<float> clocks = new List<float>();
+        public readonly List<float> powers = new List<float>();
+        public float package_power = 0;
+        public float cores_power = 0;
         public float total_load = 0;
         public float total_temperature = 0;
     }
@@ -137,6 +140,19 @@ namespace OpenHardwareMonitorService
                             else
                             {
                                 hardware_info.loads.Add(sensor.Value.Value);
+                            }
+                        }else if(sensor.SensorType == SensorType.Power)
+                        {
+                            if (sensor.Name.Contains("Package"))
+                            {
+                                hardware_info.package_power = sensor.Value.Value;
+                            }else if (sensor.Name.Contains("Cores"))
+                            {
+                                hardware_info.cores_power = sensor.Value.Value;
+                            }
+                            else
+                            {
+                                hardware_info.powers.Add(sensor.Value.Value);
                             }
                         }
                     }

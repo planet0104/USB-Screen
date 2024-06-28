@@ -93,7 +93,7 @@ pub fn open_usb_raw_device(device_address: &str) -> Result<Interface>{
 // 查询所有USB屏幕设备
 // 对于USB Raw返回的第2个参数是 device_address
 // 对于USB Serial, 返回的第2个参数是串口名称
-pub fn find_all_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenInfo>{
+pub fn find_all_device(exclude_ports:&[UsbScreenInfo]) -> Vec<UsbScreenInfo>{
     let mut devices = vec![];
     if let Ok(di) = nusb::list_devices(){
         for d in di{
@@ -119,7 +119,7 @@ pub fn find_all_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenInfo>{
     // println!("USB Raw设备数量:{}", devices.len());
     #[cfg(feature = "usb-serial")]
     devices.extend_from_slice(&find_usb_serial_device(exclude_ports));
-    // println!("usb 设备:{:?}", devices);
+    info!("所有usb 设备:{:?}", devices);
 
     if devices.len() == 0{
         warn!("no available device!");
@@ -129,7 +129,9 @@ pub fn find_all_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenInfo>{
 }
 
 #[cfg(feature = "usb-serial")]
-pub fn find_usb_serial_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenInfo>{
+pub fn find_usb_serial_device(exclude_ports:&[UsbScreenInfo]) -> Vec<UsbScreenInfo>{
+    use std::time::Instant;
+
     //读取设备信息(8字节) 串口读取信息使用
     const READ_INF:u64 = u64::from_be_bytes(*b"ReadInfo");
 
@@ -138,7 +140,7 @@ pub fn find_usb_serial_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenI
 
     #[cfg(not(windows))]
     let ports = list_acm_devices();
-    // info!("ports:{:?}", ports);
+    info!("available_ports:{:?}", ports);
     
     let mut devices = vec![];
     for p in ports {
@@ -152,24 +154,34 @@ pub fn find_usb_serial_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenI
         #[cfg(not(windows))]
         let port_name = &p;
 
+        let mut port_is_opened = false;
         for exclude_port in exclude_ports{
             if exclude_port.address == *port_name{
-                devices.push((**exclude_port).clone());
-                continue;
+                devices.push(exclude_port.clone());
+                port_is_opened = true;
+                break;
             }
         }
+        if port_is_opened{
+            continue;
+        }
+
+        let t = Instant::now();
         let mut port = match SerialPort::open(port_name, 115200){
             Ok(p) => p,
-            Err(err) => {
-                error!("port open failed:{:?}", err);
+            Err(_err) => {
+                // error!("{port_name} open failed:{:?}", err);
                 continue
             }
         };
-        let _ = port.set_read_timeout(Duration::from_millis(300));
-        let _ = port.set_write_timeout(Duration::from_micros(300));
+        let _ = port.set_read_timeout(Duration::from_millis(100));
+        let _ = port.set_write_timeout(Duration::from_millis(100));
         let serial_number = &mut [0u8; 16];
-        for _ in 0..3{
-            let _ = port.write(&READ_INF.to_be_bytes());
+        for _ in 0..2{
+            if let Err(_err) = port.write(&READ_INF.to_be_bytes()){
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
             let _ = port.flush();
             std::thread::sleep(Duration::from_millis(10));
             if let Ok(_) = port.read(serial_number){
@@ -187,6 +199,7 @@ pub fn find_usb_serial_device(exclude_ports:&[&UsbScreenInfo]) -> Vec<UsbScreenI
             }
             std::thread::sleep(Duration::from_millis(10));
         }
+        info!("读取{port_name}耗时:{}ms", t.elapsed().as_millis());
     }
     devices
 }
