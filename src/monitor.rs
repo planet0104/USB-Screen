@@ -51,6 +51,8 @@ pub struct HardwareInfo {
     pub temperatures: Vec<f32>,
     pub loads: Vec<f32>,
     pub clocks: Vec<f32>,
+    pub package_power: f32,
+    pub cores_power: f32,
     pub total_load: f32,
     pub total_temperature: f32,
 }
@@ -77,6 +79,7 @@ pub struct SystemInfo {
     watch_cpu: bool,
     watch_cpu_clock_speed: bool,
     watch_cpu_temperatures: bool,
+    watch_cpu_power: bool,
     watch_cpu_fan: bool,
     watch_gpu_clock_speed: bool,
     watch_gpu_temperatures: bool,
@@ -98,6 +101,8 @@ pub struct SystemInfo {
     cpu_clock_speed: Vec<f32>,
     cpu_temperatures: Vec<f32>,
     cpu_temperature_total: f32,
+    cpu_package_power: f32,
+    cpu_cores_power: f32,
     cpu_fans: Vec<f32>,
     gpu_clocks: Vec<Vec<f32>>,
     gpu_temperatures: Vec<Vec<f32>>,
@@ -136,6 +141,7 @@ impl SystemInfo {
             watch_cpu_clock_speed: false,
             watch_cpu_fan: false,
             watch_cpu_temperatures: false,
+            watch_cpu_power: false,
             watch_gpu_clock_speed: false,
             watch_gpu_fan: false,
             watch_gpu_temperatures: false,
@@ -154,6 +160,8 @@ impl SystemInfo {
             cpu_clock_speed: vec![],
             cpu_temperatures: vec![],
             cpu_temperature_total: 0.,
+            cpu_cores_power: 0.,
+            cpu_package_power: 0.,
             cpu_fans: vec![],
             gpu_clocks: vec![],
             gpu_fans: vec![],
@@ -496,6 +504,19 @@ pub fn watch_cpu_temperatures(val: bool) -> Result<()> {
     Ok(())
 }
 
+
+pub fn watch_cpu_power(val: bool) -> Result<()> {
+    let mut sys_info = SYSTEM_INFO.write().map_err(|err| anyhow!("{:?}", err))?;
+    sys_info.watch_cpu_power = val;
+    #[cfg(windows)]
+    {
+        if val {
+            start_hardware_monitor_service(&mut *sys_info)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn watch_cpu_fan(val: bool) -> Result<()> {
     let mut sys_info = SYSTEM_INFO.write().map_err(|err| anyhow!("{:?}", err))?;
     sys_info.watch_cpu_fan = val;
@@ -666,6 +687,16 @@ pub fn cpu_clock_speed(index: Option<usize>) -> Option<String> {
 pub fn cpu_temperature() -> Option<String> {
     let ctx = try_read_ctx()?;
     Some(format!("{:.1}°C", ctx.cpu_temperature_total))
+}
+
+pub fn cpu_cores_power() -> Option<String> {
+    let ctx = try_read_ctx()?;
+    Some(format!("{:.1}W", ctx.cpu_cores_power))
+}
+
+pub fn cpu_package_power() -> Option<String> {
+    let ctx = try_read_ctx()?;
+    Some(format!("{:.1}W", ctx.cpu_package_power))
 }
 
 pub fn cpu_fan() -> Option<String> {
@@ -1296,6 +1327,7 @@ pub static HTTP_PORT: Lazy<u16> = Lazy::new(|| {
                 let is_open = if let Ok(ctx) = SYSTEM_INFO.read() {
                     ctx.watch_cpu_fan
                         || ctx.watch_cpu_temperatures
+                        || ctx.watch_cpu_power
                         || ctx.watch_gpu_clock_speed
                         || ctx.watch_gpu_fan
                         || ctx.watch_gpu_load
@@ -1321,6 +1353,8 @@ pub static HTTP_PORT: Lazy<u16> = Lazy::new(|| {
                                     ctx.cpu_temperatures = info.cpu_infos[0].temperatures.clone();
                                     ctx.cpu_fans = info.cpu_infos[0].fans.clone();
                                     ctx.cpu_temperature_total = info.cpu_infos[0].total_temperature;
+                                    ctx.cpu_cores_power = info.cpu_infos[0].cores_power;
+                                    ctx.cpu_package_power = info.cpu_infos[0].package_power;
                                 }
                                 ctx.gpu_clocks.clear();
                                 ctx.gpu_fans.clear();

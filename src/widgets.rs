@@ -213,6 +213,12 @@ impl Widget for TextWidget {
                 "cpu_temp." => {
                     Some(monitor::cpu_temperature().unwrap_or(monitor::EMPTY_STRING.to_string()))
                 }
+                "cpu_cores_power" => {
+                    Some(monitor::cpu_cores_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                }
+                "cpu_package_power" => {
+                    Some(monitor::cpu_package_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                }
                 "cpu_fan" => Some(monitor::cpu_fan().unwrap_or(monitor::EMPTY_STRING.to_string())),
                 "gpu_fan" => Some(
                     monitor::gpu_fan(self.num_widget_index)
