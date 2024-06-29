@@ -255,7 +255,7 @@ export component CanvasEditor inherits Window{
                             ComboBox {
                                 width: 135px;
                                 height: self.preferred-height*1.8;
-                                model: ["刷新率:1帧/秒", "刷新率:2帧/秒", "刷新率:3帧/秒", "刷新率:4帧/秒", "刷新率:5帧/秒", "刷新率:10帧/秒", "刷新率:15帧/秒"];
+                                model: ["刷新率:0.2帧/秒", "刷新率:0.5帧/秒", "刷新率:1帧/秒", "刷新率:2帧/秒", "刷新率:3帧/秒", "刷新率:4帧/秒", "刷新率:5帧/秒", "刷新率:10帧/秒", "刷新率:15帧/秒"];
                                 current-value <=> fps;
                                 selected(name) => {
                                     fps = name;

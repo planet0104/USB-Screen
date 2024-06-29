@@ -27,7 +27,7 @@ pub struct SaveableScreen {
     pub height: u32,
     pub model: String,
     //最大刷新帧率
-    pub fps: i32,
+    pub fps: f32,
     //指定链接设备编号
     pub device_address: Option<String>,
     pub widgets: Vec<SaveableWidget>,
@@ -53,7 +53,7 @@ pub struct ScreenRender {
     pub canvas: OffscreenCanvas,
     pub font_name: String,
     pub font: Option<Vec<u8>>,
-    pub fps: i32,
+    pub fps: f32,
     pub device_address: Option<String>
 }
 
@@ -77,7 +77,7 @@ impl ScreenRender {
             font_name,
             font: font_file_clone.map(|v| v.to_vec()),
             widgets: vec![],
-            fps: 10,
+            fps: 10.,
             device_address: None,
         })
     }
@@ -103,6 +103,7 @@ impl ScreenRender {
                 }
                 "webcam" =>{
                     if let Some(widget) = widget.as_any_mut().downcast_mut::<ImageWidget>() {
+                        info!("webcam: tag1={:?}", widget.tag1);
                         monitor::watch_webcam(Some(WebcamInfo{
                             width: self.width,
                             height: self.height,

@@ -4,10 +4,12 @@ version = "1.1.0"
 edition = "2021"
 
 [features]
-default = ["editor", "usb-serial", "webcam"]
-usb-serial = ["serial2"]
-webcam = ["nokhwa"]
-editor = ["slint", "tray-icon", "tao"]
+default = ["v4l-webcam"]
+# default = ["editor", "tray", "nokhwa-webcam"]
+nokhwa-webcam = ["nokhwa"]
+v4l-webcam = ["v4l"]
+editor = ["slint"]
+tray = ["tray-icon", "tao"]
 
 [dependencies]
 anyhow = "1"
@@ -36,7 +38,7 @@ ttf-parser = "0.21.1"
 local-ip-address = "0.6.1"
 nusb = "0.1.8"
 futures-lite = "2.3.0"
-serial2 = { version="0.2.26", optional = true }
+serialport = { version="4.4.0" }
 slint = { version="1.6", optional = true }
 nokhwa = { version="0.10.4", features = ["input-native"], optional = true }
 human-repr = "1.1.0"
@@ -54,7 +56,7 @@ tiny_http = "0.12"
 psutil = "3.3.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-
+v4l = { version="0.14.0", default-features = false, features = ["v4l2"], optional = true }
 
 [build-dependencies]
 slint-build = "1.6"

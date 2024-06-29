@@ -3,4 +3,3 @@
 #git rm -r --cached OpenHardwareMonitorService/obj
 /OpenHardwareMonitorService/obj
 /dist
-/Cross.toml

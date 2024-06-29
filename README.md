@@ -1,21 +1,63 @@
 # USB Screen
  USB屏幕&编辑器
 
+# 编译
 
-## windows
+## 编译aarch64-linux
+
+1、设置default features，只启用 v4l-webcam
+
+```toml
+[features]
+default = ["v4l-webcam"]
+```
+
+2、启动 DockerDesktop
+
+3、进入 wsl2 Ubuntu
+
+4、安装 cross
+
+```shell
+cargo install cross --git https://github.com/cross-rs/cross
+```
+
+5、运行 build-aarch64.sh
+
+注意 Cross.toml 中的配置
+
+```shell
+sh build-aarch64.sh
+```
+
+# 运行编辑器
+
+## windows中运行
+
+设置 deault features
+
+```toml
+[features]
+default = ["editor", "tray", "nokhwa-webcam"]
+```
+
 ```cmd
 ./run.cmd
 ```
 
-## Ubuntu
+## Ubuntu中运行
+
+设置 deault features
+
+```toml
+[features]
+default = ["editor", "v4l-webcam"]
+```
 
 ```bash
 # export https_proxy=http://192.168.1.25:6003;export http_proxy=http://192.168.1.25:6003;export all_proxy=socks5://192.168.1.25:6003
 # export https_proxy=;export http_proxy=;export all_proxy=;
-sudo apt-get install -y libv4l-dev
-sudo apt-get install libclang-dev
-# sudo apt install -y clang libavcodec-dev libavformat-dev libavfilter-dev libavdevice-dev libavutil-dev pkg-config
-# sudo apt install yasm
+sudo apt-get install -y libclang-dev libv4l-dev libudev-dev
 
 sh run.sh
 # sudo ./target/debug/USB-Screen

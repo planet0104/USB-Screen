@@ -20,6 +20,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::monitor;
 use crate::usb_screen::{self, UsbScreen, UsbScreenInfo};
 use crate::{
     nmc::CITIES,
@@ -54,7 +55,7 @@ struct CanvasEditorContext {
     start_drag_dx: i32,
     start_drag_dy: i32,
     picker_img: RgbImage,
-    fps: i32,
+    fps: f32,
     last_frame_time: Option<Instant>,
     devices: Vec<UsbScreenInfo>
 }
@@ -116,7 +117,7 @@ impl CanvasEditorContext {
             list_model,
             screens,
             picker_img,
-            fps: 10,
+            fps: 10.,
             last_frame_time: None,
             devices: vec![],
         }
@@ -250,7 +251,7 @@ impl CanvasEditorContext {
             .set_canvas_frame(slint::Image::from_rgba8(buf));
 
         if let Some(last_frame_time) = self.last_frame_time.as_ref(){
-            if (last_frame_time.elapsed().as_millis() as i32) < 1000/self.fps{
+            if (last_frame_time.elapsed().as_millis() as i32) < (1000./self.fps) as i32{
                 return;
             }
         }
@@ -508,6 +509,7 @@ impl CanvasEditorContext {
             if widget.is_webcam(){
                 //更新摄像头
                 widget.tag1 = Some(tag1.to_string());
+                let _ = self.screen.setup_monitor();
             }
         }
 
@@ -1396,11 +1398,11 @@ impl CanvasEditorContext {
     fn on_change_fps(&mut self, fps: SharedString) {
         info!("on_change_fps {fps}");
         let fps = fps.to_string().replace("刷新率:", "").replace("帧/秒", "");
-        let mut fps = fps.parse::<i32>().unwrap_or(10);
+        let mut fps = fps.parse::<f32>().unwrap_or(10.);
         if self.screen.width > 160 && self.screen.height > 128{
             //320x240屏幕最高不超过12帧
-            if fps > 12{
-                fps = 12;
+            if fps > 12.{
+                fps = 12.;
             }
         }
         self.fps = fps;
@@ -1431,26 +1433,17 @@ pub fn run() -> Result<()> {
         },
     );
 
-    //5秒钟刷新设备列表
+    //4秒钟刷新设备列表
     let context_clone = context.clone();
     let timer = Timer::default();
     timer.start(
         TimerMode::Repeated,
-        std::time::Duration::from_secs(6),
+        std::time::Duration::from_secs(4),
         move || {
             context_clone.borrow_mut().update_device_list();
             std::thread::spawn(move ||{
                 info!("开始刷新串口列表...");
-                let connected_device: Vec<UsbScreenInfo> = if let Ok(screen) = SCREEN.lock(){
-                    if let Some(device) = screen.as_ref(){
-                        vec![device.info.clone()]
-                    }else{
-                        vec![]
-                    }
-                }else{
-                    vec![]
-                };
-                let devices = usb_screen::find_all_device(&connected_device);
+                let devices = usb_screen::find_all_device();
                 if let  Ok(mut d) = ALL_SCREENS.lock(){
                     *d = devices;
                 }

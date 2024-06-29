@@ -5,8 +5,9 @@ use std::{path::Path, process::Command, time::{Duration, Instant}};
 use anyhow::{anyhow, Result};
 use image::{buffer::ConvertBuffer, RgbImage};
 use log::{error, info};
-#[cfg(feature = "editor")]
+#[cfg(feature = "tray")]
 use tao::event_loop::ControlFlow;
+
 use usb_screen::find_and_open_a_screen;
 
 use crate::screen::ScreenRender;
@@ -19,6 +20,8 @@ mod screen;
 mod usb_screen;
 mod utils;
 mod widgets;
+#[cfg(feature = "v4l-webcam")]
+mod yuv422;
 
 fn main() -> Result<()> {
     // env_logger::init();
@@ -64,8 +67,9 @@ fn open_usb_screen(file: String) -> Result<()>{
     let mut usb_screen = usb_screen::find_and_open_a_screen();
     info!("open_usb_screen: usb_screen={}", usb_screen.is_some());
     let mut last_draw_time = Instant::now();
-    let frame_duration = 1000/render.fps as u128;
-
+    let frame_duration = (1000./render.fps) as u128;
+    //设置系统信息更新延迟
+    let _ = monitor::set_update_delay(frame_duration);
     loop {
         if last_draw_time.elapsed().as_millis() < frame_duration{
             std::thread::sleep(Duration::from_millis(5));
@@ -103,7 +107,7 @@ fn create_tray_icon(file: String) -> Result<()> {
         return Ok(());
     }
 
-    #[cfg(feature = "editor")]
+    #[cfg(feature = "tray")]
     {
         std::thread::spawn(move ||{
             let ret = open_usb_screen(file);
@@ -173,6 +177,7 @@ fn create_tray_icon(file: String) -> Result<()> {
             }
         });
     }
+    Ok(())
 }
 
 fn read_screen_file() -> Option<String> {
