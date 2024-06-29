@@ -22,12 +22,16 @@ default = ["v4l-webcam"]
 cargo install cross --git https://github.com/cross-rs/cross
 ```
 
-5、运行 build-aarch64.sh
+5、编译
 
 注意 Cross.toml 中的配置
 
 ```shell
-sh build-aarch64.sh
+# rustup component add rust-src --toolchain nightly
+RUSTFLAGS="-Zlocation-detail=none" cross +nightly build -Z build-std=std,panic_abort \
+  -Z build-std-features=panic_immediate_abort \
+  -Z build-std-features="optimize_for_size" \
+  --target aarch64-unknown-linux-gnu --release
 ```
 
 # 运行编辑器

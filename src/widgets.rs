@@ -236,6 +236,12 @@ impl Widget for TextWidget {
                     monitor::gpu_temperature(self.num_widget_index)
                         .unwrap_or(monitor::EMPTY_STRING.to_string()),
                 ),
+                "gpu_cores_power" => {
+                    Some(monitor::gpu_cores_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                }
+                "gpu_package_power" => {
+                    Some(monitor::gpu_package_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                }
                 "num_cpu" => monitor::num_cpus(),
                 "num_process" => monitor::num_process(),
                 "disk_usage" => monitor::disk_usage(self.num_widget_index),

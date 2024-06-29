@@ -107,6 +107,8 @@ pub struct SystemInfo {
     gpu_clocks: Vec<Vec<f32>>,
     gpu_temperatures: Vec<Vec<f32>>,
     gpu_temperature_total: Vec<f32>,
+    gpu_package_power: f32,
+    gpu_cores_power: f32,
     gpu_fans: Vec<Vec<f32>>,
     gpu_load: Vec<Vec<f32>>,
     gpu_load_total: Vec<f32>,
@@ -169,6 +171,8 @@ impl SystemInfo {
             gpu_load: vec![],
             gpu_load_total: vec![],
             gpu_temperatures: vec![],
+            gpu_cores_power: 0.,
+            gpu_package_power: 0.,
             gpu_temperature_total: vec![],
             num_process: EMPTY_STRING.to_string(),
             disk_usage: HashMap::new(),
@@ -751,6 +755,16 @@ pub fn gpu_temperature(index: usize) -> Option<String> {
     ctx.gpu_temperature_total
         .get(index)
         .map(|t| format!("{:.1}°C", t))
+}
+
+pub fn gpu_cores_power() -> Option<String> {
+    let ctx = try_read_ctx()?;
+    Some(format!("{:.1}W", ctx.gpu_cores_power))
+}
+
+pub fn gpu_package_power() -> Option<String> {
+    let ctx = try_read_ctx()?;
+    Some(format!("{:.1}W", ctx.gpu_package_power))
 }
 
 pub fn gpu_fan(index: usize) -> Option<String> {
@@ -1429,6 +1443,8 @@ pub static HTTP_PORT: Lazy<u16> = Lazy::new(|| {
                                     ctx.gpu_load.push(gpu_info.loads.clone());
                                     ctx.gpu_temperature_total.push(gpu_info.total_temperature);
                                     ctx.gpu_load_total.push(gpu_info.total_load);
+                                    ctx.gpu_cores_power = gpu_info.cores_power;
+                                    ctx.gpu_package_power = gpu_info.package_power;
                                 }
                             }
                         }
@@ -1534,7 +1550,6 @@ pub fn query_net_ip() -> Result<NetIpInfo> {
     let resp = serde_json::from_str::<NetIpInfo>(&json)?;
     Ok(resp)
 }
-
 
 #[cfg(feature = "v4l-webcam")]
 pub fn open_v4l_webcam<'a>(index: i32) -> Result<(v4l::Device, v4l::format::Format, v4l::prelude::MmapStream<'a>)>{

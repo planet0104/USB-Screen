@@ -4,8 +4,12 @@ version = "1.1.0"
 edition = "2021"
 
 [features]
-default = ["v4l-webcam"]
-# default = ["editor", "tray", "nokhwa-webcam"]
+# aarch64 linux
+# default = ["v4l-webcam"]
+# windows
+default = ["editor", "tray", "nokhwa-webcam"]
+# x86_64 linux
+# default = ["editor", "v4l-webcam"]
 nokhwa-webcam = ["nokhwa"]
 v4l-webcam = ["v4l"]
 editor = ["slint"]
