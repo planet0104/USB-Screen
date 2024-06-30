@@ -3,6 +3,7 @@ use image::{Rgb, RgbImage};
 use log::{info, warn};
 use nusb::Interface;
 use anyhow::{anyhow, Result};
+#[cfg(feature = "usb-serial")]
 use serialport::{SerialPort, SerialPortInfo, SerialPortType};
 
 use crate::rgb565::rgb888_to_rgb565_be;
@@ -20,6 +21,7 @@ pub struct UsbScreenInfo{
 
 pub enum UsbScreen{
     USBRaw((UsbScreenInfo, Interface)),
+    #[cfg(feature = "usb-serial")]
     USBSerial((UsbScreenInfo, Box<dyn SerialPort>))
 }
 
@@ -33,6 +35,7 @@ impl UsbScreen{
                 }
             }
 
+            #[cfg(feature = "usb-serial")]
             UsbScreen::USBSerial((info, port)) => {
                 if img.width() <= info.width as u32 && img.height() <= info.height as u32{
                     let _ = draw_rgb_image_serial(x, y, img, port.as_mut());
@@ -49,9 +52,16 @@ impl UsbScreen{
             //USB Raw设备, addr是device_address
             Ok(Self::USBRaw((info, open_usb_raw_device(&addr)?)))
         }else{
-            //USB串口设备, addr是串口名称
-            let screen =  serialport::new(&info.address, 115_200).open()?;
-            Ok(Self::USBSerial((info, screen)))
+            #[cfg(feature = "usb-serial")]
+            {
+                //USB串口设备, addr是串口名称
+                let screen =  serialport::new(&info.address, 115_200).open()?;
+                Ok(Self::USBSerial((info, screen)))
+            }
+            #[cfg(not(feature = "usb-serial"))]
+            {
+                Err(anyhow!("此平台不支持 USB串口设备"))
+            }
         }
     }
 }
@@ -96,6 +106,7 @@ pub fn find_all_device() -> Vec<UsbScreenInfo>{
     let mut devices = vec![];
     if let Ok(di) = nusb::list_devices(){
         for d in di{
+            info!("USB Raw设备:{:?}", d);
             let serial_number = d.serial_number().unwrap_or("");
             if  d.product_string().unwrap_or("") == "USB Screen" && serial_number.starts_with("USBSCR"){
                 let label = format!("USB Screen({})", d.device_address());
@@ -111,6 +122,7 @@ pub fn find_all_device() -> Vec<UsbScreenInfo>{
         }
     }
     // println!("USB Raw设备数量:{}", devices.len());
+    #[cfg(feature = "usb-serial")]
     devices.extend_from_slice(&find_usb_serial_device());
     info!("所有usb 设备:{:?}", devices);
 
@@ -121,10 +133,12 @@ pub fn find_all_device() -> Vec<UsbScreenInfo>{
     devices
 }
 
+#[cfg(feature = "usb-serial")]
 pub fn find_usb_serial_device() -> Vec<UsbScreenInfo>{
     let ports: Vec<SerialPortInfo> = serialport::available_ports().unwrap_or(vec![]);
     let mut devices = vec![];
     for p in ports {
+        info!("USB Serial 设备:{:?}", p);
         match p.port_type.clone(){
             SerialPortType::UsbPort(port) => {
                 let serial_number = port.serial_number.unwrap_or("".to_string());
@@ -153,6 +167,7 @@ pub fn clear_screen(color: Rgb<u8>, interface:&Interface, width: u16, height: u1
     draw_rgb_image(0, 0, &img, interface)
 }
 
+#[cfg(feature = "usb-serial")]
 pub fn clear_screen_serial(color: Rgb<u8>, port:&mut dyn SerialPort, width: u16, height: u16) -> anyhow::Result<()>{
     let mut img = RgbImage::new(width as u32, height as u32);
     for p in img.pixels_mut(){
@@ -169,7 +184,6 @@ pub fn draw_rgb_image(x: u16, y: u16, img:&RgbImage, interface:&Interface) -> an
 
 pub fn draw_rgb565(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, interface:&Interface) -> anyhow::Result<()>{
     let rgb565_u8_slice = lz4_flex::compress_prepend_size(rgb565);
-
     const IMAGE_AA:u64 = 7596835243154170209;
     const BOOT_USB:u64 = 7093010483740242786;
     const IMAGE_BB:u64 = 7596835243154170466;
@@ -181,24 +195,24 @@ pub fn draw_rgb565(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, interf
     img_begin[12..14].copy_from_slice(&x.to_be_bytes());
     img_begin[14..16].copy_from_slice(&y.to_be_bytes());
     // println!("draw:{x}x{y} {width}x{height}");
-
     block_on(interface.bulk_out(BULK_OUT_EP, img_begin.into())).status?;
     //读取
     // let result = block_on(interface.bulk_in(BULK_IN_EP, RequestBuffer::new(64))).data;
     // let msg = String::from_utf8(result)?;
     // println!("{msg}ms");
-
     block_on(interface.bulk_out(BULK_OUT_EP, rgb565_u8_slice.into())).status?;
     block_on(interface.bulk_out(BULK_OUT_EP, IMAGE_BB.to_be_bytes().into())).status?;
     Ok(())
 }
 
+#[cfg(feature = "usb-serial")]
 pub fn draw_rgb_image_serial(x: u16, y: u16, img:&RgbImage, port:&mut dyn SerialPort) -> anyhow::Result<()>{
     //ST7789驱动使用的是Big-Endian
     let rgb565 = rgb888_to_rgb565_be(&img, img.width() as usize, img.height() as usize);
     draw_rgb565_serial(&rgb565, x, y, img.width() as u16, img.height() as u16, port)
 }
 
+#[cfg(feature = "usb-serial")]
 pub fn draw_rgb565_serial(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, port:&mut dyn SerialPort) -> anyhow::Result<()>{
     
     let rgb565_u8_slice = lz4_flex::compress_prepend_size(rgb565);

@@ -3,7 +3,7 @@
 #
 # arm64版本不支持编辑器，修改默认features后再编译：
 # [features]
-# default = ["v4l-webcam"]
+# default = ["v4l-webcam", "usb-serial"]
 #
 # cargo install cross --git https://github.com/cross-rs/cross
 # cross build --target aarch64-unknown-linux-gnu --release

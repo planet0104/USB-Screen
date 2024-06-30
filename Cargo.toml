@@ -5,15 +5,16 @@ edition = "2021"
 
 [features]
 # aarch64 linux
-# default = ["v4l-webcam"]
+default = ["v4l-webcam", "usb-serial"]
 # windows
-default = ["editor", "tray", "nokhwa-webcam"]
+# default = ["editor", "tray", "nokhwa-webcam", "usb-serial"]
 # x86_64 linux
-# default = ["editor", "v4l-webcam"]
+# default = ["editor", "v4l-webcam", "usb-serial"]
 nokhwa-webcam = ["nokhwa"]
 v4l-webcam = ["v4l"]
 editor = ["slint"]
 tray = ["tray-icon", "tao"]
+usb-serial = ["serialport"]
 
 [dependencies]
 anyhow = "1"
@@ -42,7 +43,7 @@ ttf-parser = "0.21.1"
 local-ip-address = "0.6.1"
 nusb = "0.1.8"
 futures-lite = "2.3.0"
-serialport = { version="4.4.0" }
+serialport = { version="4.4.0", optional = true }
 slint = { version="1.6", optional = true }
 nokhwa = { version="0.10.4", features = ["input-native"], optional = true }
 human-repr = "1.1.0"

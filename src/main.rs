@@ -65,9 +65,10 @@ fn open_usb_screen(file: String) -> Result<()>{
 
     render.setup_monitor()?;
     let mut usb_screen = usb_screen::find_and_open_a_screen();
-    info!("open_usb_screen: usb_screen={}", usb_screen.is_some());
+    info!("USB Screen是否已打开: {}", usb_screen.is_some());
     let mut last_draw_time = Instant::now();
     let frame_duration = (1000./render.fps) as u128;
+    info!("帧时间:{}ms", frame_duration);
     //设置系统信息更新延迟
     let _ = monitor::set_update_delay(frame_duration);
     loop {

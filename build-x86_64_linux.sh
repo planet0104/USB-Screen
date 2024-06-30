@@ -3,7 +3,7 @@
 #
 # 修改默认features后再编译：
 # [features]
-# default = ["editor", "v4l-webcam"]
+# default = ["editor", "v4l-webcam", usb-serial]
 #
 # cargo install cross --git https://github.com/cross-rs/cross
 # cross build --target x86_64-unknown-linux-gnu --release
