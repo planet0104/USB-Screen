@@ -5,7 +5,7 @@
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{866B2D60-AE07-43EE-937E-F4129843CD6F}</ProjectGuid>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <RootNamespace>OpenHardwareMonitorService</RootNamespace>
     <AssemblyName>OpenHardwareMonitorService</AssemblyName>
     <TargetFrameworkVersion>v4.5.1</TargetFrameworkVersion>
