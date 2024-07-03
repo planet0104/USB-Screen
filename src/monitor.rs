@@ -54,6 +54,8 @@ pub struct HardwareInfo {
     pub cores_power: f32,
     pub total_load: f32,
     pub total_temperature: f32,
+    pub memory_load: f32,
+    pub memory_total: f32,
 }
 
 #[cfg(windows)]
@@ -111,6 +113,8 @@ pub struct SystemInfo {
     gpu_cores_power: f32,
     gpu_fans: Vec<Vec<f32>>,
     gpu_load: Vec<Vec<f32>>,
+    gpu_memory_load: Vec<f32>,
+    gpu_memory_total: Vec<f32>,
     gpu_load_total: Vec<f32>,
     num_process: String,
     disk_usage: HashMap<usize, String>,
@@ -169,7 +173,9 @@ impl SystemInfo {
             gpu_clocks: vec![],
             gpu_fans: vec![],
             gpu_load: vec![],
+            gpu_memory_load: vec![],
             gpu_load_total: vec![],
+            gpu_memory_total: vec![],
             gpu_temperatures: vec![],
             gpu_cores_power: 0.,
             gpu_package_power: 0.,
@@ -727,6 +733,14 @@ pub fn cpu_fan() -> Option<String> {
 pub fn gpu_load(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
     let mut load_total = ctx.gpu_load_total.get(index).clone();
+
+    if load_total.is_none(){
+        return ctx.gpu_load.get(index).map(|loads|{
+            let load = loads.get(0).unwrap_or(&0.);
+            format!("{load}%")
+        });
+    }
+
     if let Some(t) = load_total {
         if *t == 0.0 && ctx.gpu_load.len() > 0 {
             if ctx.gpu_load[0].len() > 0 {
@@ -735,6 +749,29 @@ pub fn gpu_load(index: usize) -> Option<String> {
         }
     }
     load_total.map(|load| format!("{load}%"))
+}
+
+pub fn gpu_memory_load(index: usize) -> Option<String> {
+    let ctx = try_read_ctx()?;
+
+    return ctx.gpu_memory_load.get(index).map(|load|{
+        format!("{:.1}%", load)
+    });
+}
+
+pub fn gpu_memory_total_mb(index: usize) -> Option<String> {
+    let ctx = try_read_ctx()?;
+    return ctx.gpu_memory_total.get(index).map(|total|{
+        format!("{total}")
+    });
+}
+
+pub fn gpu_memory_total_gb(index: usize) -> Option<String> {
+    let ctx = try_read_ctx()?;
+    return ctx.gpu_memory_total.get(index).map(|total|{
+        let gb = total / 1024.;
+        format!("{:.1}", gb)
+    });
 }
 
 pub fn gpu_clocks(index: usize) -> Option<String> {
@@ -752,9 +789,9 @@ pub fn gpu_clocks(index: usize) -> Option<String> {
 
 pub fn gpu_temperature(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
-    ctx.gpu_temperature_total
+    ctx.gpu_temperatures
         .get(index)
-        .map(|t| format!("{:.1}°C", t))
+        .map(|t| format!("{:.1}°C", t.get(0).unwrap_or(&0.)))
 }
 
 pub fn gpu_cores_power() -> Option<String> {
@@ -1436,6 +1473,8 @@ pub static HTTP_PORT: Lazy<u16> = Lazy::new(|| {
                                 ctx.gpu_temperatures.clear();
                                 ctx.gpu_temperature_total.clear();
                                 ctx.gpu_load_total.clear();
+                                ctx.gpu_memory_load.clear();
+                                ctx.gpu_memory_total.clear();
                                 for gpu_info in info.gpu_infos {
                                     ctx.gpu_clocks.push(gpu_info.clocks.clone());
                                     ctx.gpu_temperatures.push(gpu_info.temperatures.clone());
@@ -1445,6 +1484,8 @@ pub static HTTP_PORT: Lazy<u16> = Lazy::new(|| {
                                     ctx.gpu_load_total.push(gpu_info.total_load);
                                     ctx.gpu_cores_power = gpu_info.cores_power;
                                     ctx.gpu_package_power = gpu_info.package_power;
+                                    ctx.gpu_memory_load.push(gpu_info.memory_load);
+                                    ctx.gpu_memory_total.push(gpu_info.memory_total);
                                 }
                             }
                         }

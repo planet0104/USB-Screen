@@ -3,6 +3,7 @@ using OpenHardwareMonitor.Hardware;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Reflection;
 using System.Text;
@@ -38,6 +39,8 @@ namespace OpenHardwareMonitorService
         public float cores_power = 0;
         public float total_load = 0;
         public float total_temperature = 0;
+        public float memory_load = 0;
+        public float memory_total = 0;
     }
 
     internal static class Program
@@ -62,6 +65,16 @@ namespace OpenHardwareMonitorService
                 return Assembly.Load(_data);
             }
         }
+
+        //private static void WriteLog(string message)
+
+        //{
+
+        //    string logFile = "LogFile.txt";
+
+        //    File.AppendAllText(logFile, DateTime.Now.ToString() + ": " + message + Environment.NewLine);
+
+        //}
 
         static void Main(string[] args)
         {
@@ -113,6 +126,8 @@ namespace OpenHardwareMonitorService
                                 hardware_info.temperatures.Add(sensor.Value.Value);
                             }
                         }
+                        else if(sensor.SensorType == SensorType.Control){
+                        }
                         else if (sensor.SensorType == SensorType.Fan)
                         {
                             hardware_info.fans.Add(sensor.Value.Value);
@@ -129,6 +144,9 @@ namespace OpenHardwareMonitorService
                             {
                                 continue;
                             }
+                            if (sensor.Name.Contains("Shader")){
+                                continue;
+                            }
                             hardware_info.clocks.Add(sensor.Value.Value);
                         }
                         else if (sensor.SensorType == SensorType.Load)
@@ -137,9 +155,11 @@ namespace OpenHardwareMonitorService
                             {
                                 hardware_info.total_load = sensor.Value.Value;
                             }
-                            else
+                            else if(sensor.Name.Contains("Core"))
                             {
                                 hardware_info.loads.Add(sensor.Value.Value);
+                            }else if(sensor.Name.Contains("Memory")){
+                                hardware_info.memory_load = sensor.Value.Value;
                             }
                         }else if(sensor.SensorType == SensorType.Power)
                         {
@@ -153,6 +173,10 @@ namespace OpenHardwareMonitorService
                             else
                             {
                                 hardware_info.powers.Add(sensor.Value.Value);
+                            }
+                        }else if(sensor.SensorType == SensorType.SmallData){
+                            if(sensor.Name == "GPU Memory Total"){
+                                hardware_info.memory_total = sensor.Value.Value;   
                             }
                         }
                     }

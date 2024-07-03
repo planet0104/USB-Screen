@@ -120,7 +120,7 @@ impl ScreenRender {
                 "cpu_fan" => monitor::watch_cpu_fan(true)?,
                 "gpu_fan" => monitor::watch_gpu_fan(true)?,
                 "gpu_clock" => monitor::watch_gpu_clock_speed(true)?,
-                "gpu_load" => monitor::watch_gpu_load(true)?,
+                "gpu_load" | "gpu_memory_load" | "gpu_memory_total_mb" | "gpu_memory_total_gb" => monitor::watch_gpu_load(true)?,
                 "gpu_temp." => monitor::watch_gpu_temperatures(true)?,
                 "num_process" => monitor::watch_process(true)?,
                 "disk_usage" => monitor::watch_disk(true)?,

@@ -5,9 +5,9 @@ edition = "2021"
 
 [features]
 # aarch64 linux
-default = ["v4l-webcam", "usb-serial"]
+# default = ["v4l-webcam", "usb-serial"]
 # windows
-# default = ["editor", "tray", "nokhwa-webcam", "usb-serial"]
+default = ["editor", "tray", "nokhwa-webcam", "usb-serial"]
 # x86_64 linux
 # default = ["editor", "v4l-webcam", "usb-serial"]
 nokhwa-webcam = ["nokhwa"]

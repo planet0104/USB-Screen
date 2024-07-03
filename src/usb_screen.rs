@@ -106,6 +106,7 @@ pub fn find_all_device() -> Vec<UsbScreenInfo>{
     let mut devices = vec![];
     if let Ok(di) = nusb::list_devices(){
         for d in di{
+            #[cfg(not(windows))]
             info!("USB Raw设备:{:?}", d);
             let serial_number = d.serial_number().unwrap_or("");
             if  d.product_string().unwrap_or("") == "USB Screen" && serial_number.starts_with("USBSCR"){
@@ -124,6 +125,7 @@ pub fn find_all_device() -> Vec<UsbScreenInfo>{
     // println!("USB Raw设备数量:{}", devices.len());
     #[cfg(feature = "usb-serial")]
     devices.extend_from_slice(&find_usb_serial_device());
+    #[cfg(not(windows))]
     info!("所有usb 设备:{:?}", devices);
 
     if devices.len() == 0{
@@ -138,6 +140,7 @@ pub fn find_usb_serial_device() -> Vec<UsbScreenInfo>{
     let ports: Vec<SerialPortInfo> = serialport::available_ports().unwrap_or(vec![]);
     let mut devices = vec![];
     for p in ports {
+        #[cfg(not(windows))]
         info!("USB Serial 设备:{:?}", p);
         match p.port_type.clone(){
             SerialPortType::UsbPort(port) => {

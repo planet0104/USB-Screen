@@ -232,6 +232,18 @@ impl Widget for TextWidget {
                     monitor::gpu_load(self.num_widget_index)
                         .unwrap_or(monitor::EMPTY_STRING.to_string()),
                 ),
+                "gpu_memory_load" => Some(
+                    monitor::gpu_memory_load(self.num_widget_index)
+                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                ),
+                "gpu_memory_total_mb" => Some(
+                    monitor::gpu_memory_total_mb(self.num_widget_index)
+                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                ),
+                "gpu_memory_total_gb" => Some(
+                    monitor::gpu_memory_total_gb(self.num_widget_index)
+                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                ),
                 "gpu_temp." => Some(
                     monitor::gpu_temperature(self.num_widget_index)
                         .unwrap_or(monitor::EMPTY_STRING.to_string()),
