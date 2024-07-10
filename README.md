@@ -1,15 +1,54 @@
 # USB Screen
  USB屏幕&编辑器
 
+# 硬件
+
+## 支持的屏幕型号
+
+目前支持 ST7735 128x160 和 ST7789 320x240两种屏幕
+
+### ST7735接线方式
+```
+    GND <=> GND
+    VCC <=> 3V3
+    SCL <=> SCLK(GPIO6)
+    SDA <=> MOSI(GPIO7)
+    RES <=> RST(GPIO14)
+    DC  <=> DC(GPIO13)
+    CS  <=> GND
+    BLK <=> 不连接
+```
+![rp2040.png](images/rp2040.png)
+![st7735.jpg](images/st7735.png)
+
+### ST7789接线方式
+```
+    GND   <=> GND
+    VCC   <=> 3V3
+    SCL   <=> PIN6(clk)
+    SDA   <=> PIN7(mosi)
+    RESET <=> PIN14(rst)
+    AO    <=> PIN13
+    CS    <=> PIN9
+    BL    <=> 5V
+```
+![st7789.jpg](images/st7789.png)
+
+## 固件源码
+https://github.com/planet0104/rp2040_usb_screen
+
+## 接线方式
+
+
 # 编译
 
 ## 编译aarch64-linux
 
-1、设置default features，只启用 v4l-webcam
+1、设置default features，启用 v4l-webcam
 
 ```toml
 [features]
-default = ["v4l-webcam"]
+default = ["v4l-webcam", "usb-serial"]
 ```
 
 2、启动 DockerDesktop
