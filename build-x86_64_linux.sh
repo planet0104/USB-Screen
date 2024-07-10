@@ -6,7 +6,7 @@
 # default = ["editor", "v4l-webcam", usb-serial]
 #
 # cargo install cross --git https://github.com/cross-rs/cross
-# cross build --target x86_64-unknown-linux-gnu --release
+# cross build --target x86_64-unknown-linux-musl --release
 
 # https://github.com/johnthagen/min-sized-rust
 # rustup component add rust-src --toolchain nightly

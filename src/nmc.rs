@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use image::RgbaImage;
 use log::info;
 use once_cell::sync::Lazy;
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::{Deserialize, Serialize};
 
 pub const CITIES: Lazy<Vec<City>> =
@@ -192,10 +195,14 @@ pub fn query_city() -> Result<Vec<City>> {
 }
 
 pub fn query_weather(station_id: &str) -> Result<RealWeather> {
-    let json = reqwest::blocking::get(format!(
-        "http://www.nmc.cn/rest/weather?stationid={station_id}"
-    ))?
-    .text()?;
+    let client = reqwest::blocking::Client::new();
+    let res = client.get(format!("http://www.nmc.cn/rest/weather?stationid={station_id}"))
+        .header(USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0")
+        .header(reqwest::header::HOST, "www.nmc.cn")
+        .send()?;
+
+    let json = res.text()?;
+    
     // info!("天气:{json}");
     let resp = serde_json::from_str::<WeatherResp>(&json)?;
     Ok(resp.data.real)

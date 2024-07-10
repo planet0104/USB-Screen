@@ -273,7 +273,10 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
                     std::thread::spawn(move || {
                         info!("开始更新天气 {:?}", city);
                         let weather = match query_weather(&city.code) {
-                            Err(_err) => return,
+                            Err(err) => {
+                                error!("天气更新失败:{:?}", err);
+                                return;
+                            }
                             Ok(info) => info,
                         };
                         info!("天气已更新:{:?}", weather);
@@ -420,7 +423,10 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
                 if watch_webcam {
                     try_write(|mut ctx| {
                         if ctx.watch_webcam_task.is_none() {
-                            ctx.watch_webcam_task = Some(start_webcam_capture_thread());
+                            #[cfg(any(feature = "nokhwa-webcam", all(not(windows),feature = "v4l-webcam")))]
+                            {
+                                ctx.watch_webcam_task = Some(start_webcam_capture_thread());
+                            }
                         }
                     });
                 }
@@ -1113,14 +1119,14 @@ pub fn start_network_counter_thread() -> std::thread::JoinHandle<()> {
     })
 }
 
-#[cfg(any(feature = "nokhwa-webcam", feature = "v4l-webcam"))]
+#[cfg(any(feature = "nokhwa-webcam", all(not(windows),feature = "v4l-webcam")))]
 pub fn start_webcam_capture_thread() -> std::thread::JoinHandle<()> {
     debug!("start_webcam_capture_thread...");
     std::thread::spawn(move || {
 
         #[cfg(feature = "nokhwa-webcam")]
         let mut camera:Option<Camera> = None;
-        #[cfg(feature = "v4l-webcam")]
+        #[cfg(all(not(windows),feature = "v4l-webcam", ))]
         let mut camera:Option<(v4l::Device, v4l::format::Format, v4l::prelude::MmapStream)> = None;
         
         let mut camera_index:i32 = -1;
@@ -1157,7 +1163,7 @@ pub fn start_webcam_capture_thread() -> std::thread::JoinHandle<()> {
                             }
                         };
                     }
-                    #[cfg(feature = "v4l-webcam")]
+                    #[cfg(all(not(windows),feature = "v4l-webcam", ))]
                     {
                         match open_v4l_webcam(camera_index){
                             Ok(cam) => camera = Some(cam),
@@ -1182,7 +1188,7 @@ pub fn start_webcam_capture_thread() -> std::thread::JoinHandle<()> {
                         }
                     }
 
-                    #[cfg(feature = "v4l-webcam")]
+                    #[cfg(all(not(windows),feature = "v4l-webcam", ))]
                     {
                         use v4l::io::traits::CaptureStream;
                         
@@ -1592,7 +1598,7 @@ pub fn query_net_ip() -> Result<NetIpInfo> {
     Ok(resp)
 }
 
-#[cfg(feature = "v4l-webcam")]
+#[cfg(all(not(windows),feature = "v4l-webcam", ))]
 pub fn open_v4l_webcam<'a>(index: i32) -> Result<(v4l::Device, v4l::format::Format, v4l::prelude::MmapStream<'a>)>{
     // Allocate 4 buffers by default
     let buffer_count = 4;

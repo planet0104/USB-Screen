@@ -20,7 +20,7 @@ mod screen;
 mod usb_screen;
 mod utils;
 mod widgets;
-#[cfg(feature = "v4l-webcam")]
+#[cfg(all(not(windows),feature = "v4l-webcam"))]
 mod yuv422;
 
 fn main() -> Result<()> {
