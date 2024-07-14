@@ -78,8 +78,18 @@ impl CanvasEditorContext {
             height: 128,
         },
         ScreenSize {
+            name: "ST7735".into(),
+            width: 128,
+            height: 128,
+        },
+        ScreenSize {
             name: "ST7789".into(),
             width: 320,
+            height: 240,
+        },
+        ScreenSize {
+            name: "ST7789".into(),
+            width: 240,
             height: 240,
         }];
 
