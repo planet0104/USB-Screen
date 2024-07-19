@@ -266,7 +266,7 @@ impl Widget for TextWidget {
                 "lunar_year" => Some(monitor::lunar_year()),
                 "lunar_date" => Some(monitor::lunar_date()),
                 "weather" => match monitor::weather_info() {
-                    None => Some("N/A".to_string()),
+                    None => Some(self.text.to_string()),
                     Some(w) => {
                         match self.tag1.as_str() {
                             "1" => Some(format!("{}", w.station.city)),         //城市

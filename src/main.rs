@@ -29,6 +29,15 @@ fn main() -> Result<()> {
         .filter_level(log::LevelFilter::Info)
         .try_init();
 
+    #[cfg(windows)]
+    {
+        #[cfg(not(debug_assertions))]
+        {
+            let exe_path = std::env::current_exe()?;
+            std::env::set_current_dir(exe_path.parent().unwrap())?;
+        }
+    }
+
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     let screen_file = match args.len() {

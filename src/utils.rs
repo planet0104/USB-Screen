@@ -83,3 +83,57 @@ pub fn get_font_name(ttf: PathBuf, max_char: usize) -> anyhow::Result<String> {
     }
     Ok(new_name)
 }
+
+#[cfg(windows)]
+pub mod register_app_for_startup{
+    use anyhow::{anyhow, Result};
+    use std::path::Path;
+    use std::io::Write;
+    use windows::Win32::{
+        Foundation::MAX_PATH,
+        UI::{
+            Shell::{SHGetSpecialFolderPathW, CSIDL_STARTUP},
+            WindowsAndMessaging::GetDesktopWindow
+        }
+    };
+
+    static TEMPLATE: &str = r"[InternetShortcut]
+URL=--
+IconIndex=0
+IconFile=--
+";
+
+    pub fn register_app_for_startup(app_name: &str) -> Result<()> {
+        let hwnd = unsafe { GetDesktopWindow() };
+        let mut path: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
+        unsafe { SHGetSpecialFolderPathW(hwnd, &mut path, CSIDL_STARTUP as i32, false) };
+        let path = String::from_utf16(&path)?.replace("\u{0}", "");
+        let url_file = format!("{}\\{}.url", path, app_name);
+        //写入url文件
+        let mut file = std::fs::File::create(url_file)?;
+        let exe_path = ::std::env::current_exe()?;
+        if let Some(exe_path) = exe_path.to_str() {
+            file.write_all(TEMPLATE.replace("--", exe_path).as_bytes())?;
+            Ok(())
+        } else {
+            Err(anyhow!("exe路径读取失败!"))
+        }
+    }
+    
+    pub fn is_app_registered_for_startup(app_name: &str) -> Result<bool> {
+        let hwnd = unsafe { GetDesktopWindow() };
+        let mut path: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
+        unsafe { SHGetSpecialFolderPathW(hwnd, &mut path, CSIDL_STARTUP as i32, false) };
+        let path = String::from_utf16(&path)?.replace("\u{0}", "");
+        Ok(Path::new(&format!("{}\\{}.url", path, app_name)).exists())
+    }
+
+    pub fn remove_app_for_startup(app_name: &str) -> Result<()> {
+        let hwnd = unsafe { GetDesktopWindow() };
+        let mut path: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
+        unsafe { SHGetSpecialFolderPathW(hwnd, &mut path, CSIDL_STARTUP as i32, false) };
+        let path = String::from_utf16(&path)?.replace("\u{0}", "");
+        std::fs::remove_file(format!("{}\\{}.url", path, app_name))?;
+        Ok(())
+    }
+}

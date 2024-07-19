@@ -1,4 +1,4 @@
-import { HorizontalBox , ListView, VerticalBox, ScrollView, StandardListView, LineEdit, ComboBox, Slider, Button, StandardButton} from "std-widgets.slint";
+import { HorizontalBox , ListView, VerticalBox, ScrollView, StandardListView, LineEdit, ComboBox, Slider, Button, StandardButton, CheckBox} from "std-widgets.slint";
 import { AButton, SmallButton } from "widgets/abutton.slint";
 import { Span10px, Screen, WidgetConfig, WidgetObject, WidgetType, ConfirmDialog, ColorPicker } from "widgets/widgets.slint";
 
@@ -102,6 +102,7 @@ export component CanvasEditor inherits Window{
     in-out property <string> active_widget_type_name: "";
     in-out property <string> font-name: "凤凰点阵";
 
+    callback toggle_startup(bool);
     callback change_screen(int);
     callback change_device(string);
     callback change_fps(string);
@@ -129,6 +130,7 @@ export component CanvasEditor inherits Window{
 
     property <length> color-picker-x: 10px;
     property <length> color-picker-y: 10px;
+    in-out property <bool> reg_startup;
     in-out property <brush> picker-color;
     in-out property <float> picker-brightness;
     //回调函数，拾取了像素坐标，在代码中获取坐标处颜色
@@ -244,6 +246,20 @@ export component CanvasEditor inherits Window{
                             AButton { width: 40px; text: "保存"; clicked => { save_screen() } }
                             Span10px {}
                             AButton { width: 40px; text: "截屏"; clicked => { save_capture() } }
+                            Span10px {}
+                            Rectangle {
+                                border-radius: 4px;
+                                border-color: gray;
+                                background: rgba(255, 255, 255, 0.1);
+                                check_startup := CheckBox {
+                                    width: 100%;
+                                    checked <=> reg_startup;
+                                    text: "开机启动";
+                                    toggled => {
+                                        toggle_startup(check_startup.checked);
+                                    }
+                                }
+                            }
                             // Span10px {}
                             // AButton { width: 40px; text: "运行"; clicked => { run_mode() } }
                         }

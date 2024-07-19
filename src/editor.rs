@@ -20,7 +20,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::monitor;
+use crate::{monitor, utils};
 use crate::usb_screen::{self, UsbScreen, UsbScreenInfo};
 use crate::{
     nmc::CITIES,
@@ -1472,6 +1472,32 @@ pub fn run() -> Result<()> {
         },
     );
 
+    #[cfg(windows)]
+    {
+        let app_name = "USB Screen";
+        app.set_reg_startup(utils::register_app_for_startup::is_app_registered_for_startup(app_name).unwrap_or(false));
+        let app_clone = app.as_weak();
+        app.on_toggle_startup(move |checked|{
+            let app = app_clone.upgrade().unwrap();
+            if checked{
+                if let Err(err) = utils::register_app_for_startup::register_app_for_startup(app_name){
+                    app.set_reg_startup(false);
+                    MessageDialog::new()
+                    .set_description(format!("{:?}", err))
+                    .set_buttons(rfd::MessageButtons::Ok)
+                    .show();
+                }
+            }else{
+                if let Err(err) = utils::register_app_for_startup::remove_app_for_startup(app_name){
+                    app.set_reg_startup(true);
+                    MessageDialog::new()
+                    .set_description(format!("{:?}", err))
+                    .set_buttons(rfd::MessageButtons::Ok)
+                    .show();
+                }
+            }
+        });
+    }
     let context_clone = context.clone();
     app.on_mouse_click(move |mouse_x, mouse_y, image_width, image_height| {
         context_clone
