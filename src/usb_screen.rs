@@ -31,14 +31,14 @@ impl UsbScreen{
         match self{
             UsbScreen::USBRaw((info, interface)) => {
                 if img.width() <= info.width as u32 && img.height() <= info.height as u32{
-                    let _ = draw_rgb_image(x, y, img, interface);
+                    draw_rgb_image(x, y, img, interface)?;
                 }
             }
 
             #[cfg(feature = "usb-serial")]
             UsbScreen::USBSerial((info, port)) => {
                 if img.width() <= info.width as u32 && img.height() <= info.height as u32{
-                    let _ = draw_rgb_image_serial(x, y, img, port.as_mut());
+                    draw_rgb_image_serial(x, y, img, port.as_mut())?;
                 }
             }
         }
