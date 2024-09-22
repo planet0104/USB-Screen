@@ -41,6 +41,11 @@ static SCREEN: Lazy<Mutex<Option<CurrentUsbScreen>>> = Lazy::new(|| {
 // 所有屏幕列表
 static ALL_SCREENS: Lazy<Mutex<Vec<UsbScreenInfo>>> = Lazy::new(|| Mutex::new(vec![]) );
 
+//解压好的屏幕数据
+static UNCOMPRESSED_SCREEN: Lazy<Mutex<Option<Vec<u8>>>> = Lazy::new(|| {
+    Mutex::new(None)
+});
+
 
 slint::include_modules!();
 
@@ -1152,99 +1157,144 @@ impl CanvasEditorContext {
         if !size_fit{
             self.screen.device_address = None;
         }
+
+        toast_loading(self.app.clone(), "正在保存...");
+        let app_clone = self.app.clone();
         
-        match self.screen.to_json() {
-            Ok(file_data) => {
+        match self.screen.to_savable() {
+            Ok(saveable) => {
                 let file_name = format!("{}x{}.screen", self.screen.width, self.screen.height);
                 std::thread::spawn(move || {
+                    let file_data = match ScreenRender::saveable_to_compressed_json(&saveable){
+                        Err(err) => {
+                            error!("{:?}", err);
+                            toast(app_clone, &format!("{:?}", err));
+                            return;
+                        }
+                        Ok(v) => v
+                    };
+                    hide_loading(app_clone.clone());
                     let dlg = rfd::FileDialog::new()
                         .add_filter("screen", &["screen"])
                         .set_file_name(file_name);
                     if let Some(file) = dlg.save_file() {
                         if let Ok(mut f) = std::fs::File::create(file) {
-                            let _ = f.write_all(&file_data);
+                            if let Ok(()) = f.write_all(&file_data){
+                                toast(app_clone, "保存成功");
+                            }
                         }
                     }
                 });
             }
             Err(err) => {
                 error!("{:?}", err);
-                MessageDialog::new()
-                    .set_description(format!("{:?}", err))
-                    .set_buttons(rfd::MessageButtons::Ok)
-                    .show();
+                toast(app_clone, &format!("{:?}", err));
+            }
+        }
+    }
+
+    /// 从线程中解压数据后，通过 app传递事件来调用此方法加载屏幕
+    fn load_screen_from_uncompressed(&mut self){
+        let app_clone = self.app.clone();
+        let file = match UNCOMPRESSED_SCREEN.lock(){
+            Ok(mut v) => {
+                let v = v.take();
+                if v.is_none(){
+                    return;
+                }
+                v.unwrap()
+            }
+            Err(_) => return
+        };
+        match self.screen.load_from_file(file) {
+            Ok(()) => {
+                //更新帧率
+                let fps_str = format!("{}", self.screen.fps);
+                self.on_change_fps(SharedString::from(&fps_str));
+                //更新显示的屏幕大小
+                let app = self.app.unwrap();
+                for s in &self.screens{
+                    if s.width == self.screen.width && s.height == self.screen.height{
+                        app.set_screen_name(format!(
+                            "{ } {}x{}",
+                            s.name, s.width, s.height
+                        )
+                        .into());
+                        app.set_screen_width(s.width as f32);
+                        app.set_screen_height(s.height as f32);
+                        break;
+                    }
+                }
+                //更新显示列表
+                self.list_model = Rc::new(VecModel::from(vec![]));
+                for idx in 0..self.screen.widgets.len() {
+                    let mut text = "".to_string();
+                    let mut prefix = "".to_string();
+                    if self.screen.widgets[idx].is_text() {
+                        if let Some(widget) = self.screen.widgets[idx]
+                            .as_any_mut()
+                            .downcast_mut::<TextWidget>()
+                        {
+                            text = widget.text.to_string();
+                            prefix = widget.prefix.to_string();
+                        }
+                    }
+
+                    let model = WidgetObject {
+                        index: idx as i32,
+                        name: SharedString::from(self.screen.widgets[idx].get_label()),
+                        type_name: SharedString::from(self.screen.widgets[idx].type_name()),
+                        uuid: SharedString::from(self.screen.widgets[idx].id()),
+                        text: SharedString::from(&text),
+                        prefix: SharedString::from(&prefix),
+                        tag1: SharedString::from(""),
+                        tag2: SharedString::from(""),
+                    };
+                    info!("添加了一个:{:?}", model);
+
+                    self.list_model.push(model);
+                }
+                //刷新监听器
+                let _ = self.screen.setup_monitor();
+                //清空选中的widget
+                let app = self.app.unwrap();
+                app.set_font_name(self.screen.font_name.clone().into());
+                app.set_object_list(self.list_model.clone().into());
+                app.set_active_widget_type_name("".into());
+                app.set_active_widget_uuid("".into());
+                hide_loading(self.app.clone());
+            }
+            Err(err) => {
+                error!("{:?}", err);
+                toast(self.app.clone(), &format!("{:?}", err));
             }
         }
     }
 
     fn on_open_screen(&mut self) {
         let dlg = rfd::FileDialog::new().add_filter("screen", &["screen"]);
+        toast_loading(self.app.clone(), "加载中...");
+        let app_clone = self.app.clone();
         if let Some(file) = dlg.pick_file() {
-            match self.screen.load_from_file(file) {
-                Ok(()) => {
-                    //更新帧率
-                    let fps_str = format!("{}", self.screen.fps);
-                    self.on_change_fps(SharedString::from(&fps_str));
-                    //更新显示的屏幕大小
-                    let app = self.app.unwrap();
-                    for s in &self.screens{
-                        if s.width == self.screen.width && s.height == self.screen.height{
-                            app.set_screen_name(format!(
-                                "{ } {}x{}",
-                                s.name, s.width, s.height
-                            )
-                            .into());
-                            app.set_screen_width(s.width as f32);
-                            app.set_screen_height(s.height as f32);
-                            break;
+            std::thread::spawn(move ||{
+                match ScreenRender::decompress_screen_file(file){
+                    Ok(uncompressed_sceen) => {
+                        hide_loading(app_clone.clone());
+                        if let Ok(mut us) = UNCOMPRESSED_SCREEN.lock(){
+                            us.replace(uncompressed_sceen);
+                            let _ = app_clone.upgrade_in_event_loop(move |app| {
+                                app.invoke_screen_uncompress_ready();
+                            });
                         }
                     }
-                    //更新显示列表
-                    self.list_model = Rc::new(VecModel::from(vec![]));
-                    for idx in 0..self.screen.widgets.len() {
-                        let mut text = "".to_string();
-                        let mut prefix = "".to_string();
-                        if self.screen.widgets[idx].is_text() {
-                            if let Some(widget) = self.screen.widgets[idx]
-                                .as_any_mut()
-                                .downcast_mut::<TextWidget>()
-                            {
-                                text = widget.text.to_string();
-                                prefix = widget.prefix.to_string();
-                            }
-                        }
-
-                        let model = WidgetObject {
-                            index: idx as i32,
-                            name: SharedString::from(self.screen.widgets[idx].get_label()),
-                            type_name: SharedString::from(self.screen.widgets[idx].type_name()),
-                            uuid: SharedString::from(self.screen.widgets[idx].id()),
-                            text: SharedString::from(&text),
-                            prefix: SharedString::from(&prefix),
-                            tag1: SharedString::from(""),
-                            tag2: SharedString::from(""),
-                        };
-                        info!("添加了一个:{:?}", model);
-
-                        self.list_model.push(model);
+                    Err(err) => {
+                        error!("{:?}", err);
+                        toast(app_clone, &format!("{:?}", err));
                     }
-                    //刷新监听器
-                    let _ = self.screen.setup_monitor();
-                    //清空选中的widget
-                    let app = self.app.unwrap();
-                    app.set_font_name(self.screen.font_name.clone().into());
-                    app.set_object_list(self.list_model.clone().into());
-                    app.set_active_widget_type_name("".into());
-                    app.set_active_widget_uuid("".into());
                 }
-                Err(err) => {
-                    error!("{:?}", err);
-                    MessageDialog::new()
-                        .set_description(format!("{:?}", err))
-                        .set_buttons(rfd::MessageButtons::Ok)
-                        .show();
-                }
-            }
+            });
+        }else{
+            hide_loading(app_clone);
         }
     }
 
@@ -1478,22 +1528,17 @@ pub fn run() -> Result<()> {
         app.set_reg_startup(utils::register_app_for_startup::is_app_registered_for_startup(app_name).unwrap_or(false));
         let app_clone = app.as_weak();
         app.on_toggle_startup(move |checked|{
+            let app_clone1 = app_clone.clone();
             let app = app_clone.upgrade().unwrap();
             if checked{
                 if let Err(err) = utils::register_app_for_startup::register_app_for_startup(app_name){
                     app.set_reg_startup(false);
-                    MessageDialog::new()
-                    .set_description(format!("{:?}", err))
-                    .set_buttons(rfd::MessageButtons::Ok)
-                    .show();
+                    toast(app_clone1, &format!("{:?}", err));
                 }
             }else{
                 if let Err(err) = utils::register_app_for_startup::remove_app_for_startup(app_name){
                     app.set_reg_startup(true);
-                    MessageDialog::new()
-                    .set_description(format!("{:?}", err))
-                    .set_buttons(rfd::MessageButtons::Ok)
-                    .show();
+                    toast(app_clone1, &format!("{:?}", err));
                 }
             }
         });
@@ -1551,6 +1596,11 @@ pub fn run() -> Result<()> {
     let context_clone = context.clone();
     app.on_new_image_ready(move || {
         context_clone.borrow_mut().on_new_image_ready();
+    });
+
+    let context_clone = context.clone();
+    app.on_screen_uncompress_ready(move || {
+        context_clone.borrow_mut().load_screen_from_uncompressed();
     });
 
     let context_clone = context.clone();
@@ -1646,4 +1696,33 @@ pub fn run() -> Result<()> {
 
     app.run()?;
     Ok(())
+}
+
+
+pub fn toast(app: Weak<CanvasEditor>, msg:&str){
+    let msg = msg.to_string();
+    let _ = app.upgrade_in_event_loop(move |app|{
+        app.set_toast_message(msg.into());
+        let app_clone = app.as_weak();
+        Timer::single_shot(std::time::Duration::from_millis(1000*2), move || {
+            app_clone.upgrade().unwrap().set_toast_message("".into());
+        });
+    });
+}
+
+pub fn toast_loading(app: Weak<CanvasEditor>, msg:&str){
+    let msg = msg.to_string();
+    let _ = app.upgrade_in_event_loop(move |app|{
+        app.set_toast_message(msg.into());
+        let app_clone = app.as_weak();
+        Timer::single_shot(std::time::Duration::from_millis(1000*6), move || {
+            app_clone.upgrade().unwrap().set_toast_message("".into());
+        });
+    });
+}
+
+pub fn hide_loading(app: Weak<CanvasEditor>){
+    let _ = app.upgrade_in_event_loop(|app|{
+        app.set_toast_message("".into());
+    });
 }

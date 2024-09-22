@@ -222,10 +222,14 @@ impl ScreenRender {
         self.canvas.height()
     }
 
-    //尝试使用bindcode解析老版本screen文件
-    pub fn load_from_file(&mut self, file: PathBuf) -> Result<()> {
+    pub fn decompress_screen_file(file: PathBuf) -> Result<Vec<u8>>{
         let compressed = std::fs::read(file)?;
-        let uncompressed = decompress_size_prepended(&compressed)?;
+        Ok(decompress_size_prepended(&compressed)?)
+    }
+
+    //尝试使用bindcode解析老版本screen文件
+    pub fn load_from_file(&mut self, uncompressed: Vec<u8>) -> Result<()> {
+        
         let saveable: Result<(SaveableScreenV10, usize), bincode::error::DecodeError> =
             bincode::decode_from_slice(&uncompressed, bincode::config::standard());
 
@@ -368,6 +372,48 @@ impl ScreenRender {
                     .push(SaveableWidget::ImageWidget(widget.clone()));
             }
         }
+        let json = serde_json::to_string(&saveable)?;
+        let contents = json.as_bytes();
+        info!("压缩前:{}k", contents.len() / 1024);
+        //压缩
+        let compressed = compress_prepend_size(contents);
+        info!("压缩后:{}k", compressed.len() / 1024);
+        Ok(compressed)
+    }
+
+    //改为json格式存储，这样添加了新的字段不影响解析原有格式的screen文件
+    pub fn to_savable(&mut self) -> Result<SaveableScreen> {
+        let mut font = self.font.clone();
+        let font_name = self.font_name.clone();
+        if font_name == "凤凰点阵"{
+            font = None;
+        }
+        let mut saveable = SaveableScreen {
+            width: self.width,
+            height: self.height,
+            model: self.model.clone(),
+            font,
+            font_name,
+            widgets: vec![],
+            fps: self.fps,
+            device_address: self.device_address.clone()
+        };
+        for idx in 0..self.widgets.len() {
+            if let Some(widget) = self.widgets[idx].as_any_mut().downcast_mut::<TextWidget>() {
+                saveable
+                    .widgets
+                    .push(SaveableWidget::TextWidget(widget.clone()));
+            }
+            if let Some(widget) = self.widgets[idx].as_any_mut().downcast_mut::<ImageWidget>() {
+                saveable
+                    .widgets
+                    .push(SaveableWidget::ImageWidget(widget.clone()));
+            }
+        }
+        Ok(saveable)
+    }
+
+    pub fn saveable_to_compressed_json(saveable: &SaveableScreen) -> Result<Vec<u8>>{
         let json = serde_json::to_string(&saveable)?;
         let contents = json.as_bytes();
         info!("压缩前:{}k", contents.len() / 1024);

@@ -1,15 +1,15 @@
 [package]
 name = "USB-Screen"
-version = "1.1.4"
+version = "1.1.5"
 edition = "2021"
 
 [features]
 # aarch64 linux
 # default = ["v4l-webcam", "usb-serial"]
 # windows
-default = ["editor", "tray", "nokhwa-webcam", "usb-serial"]
+# default = ["editor", "tray", "nokhwa-webcam", "usb-serial"]
 # x86_64 linux
-# default = ["editor", "v4l-webcam", "usb-serial"]
+default = ["editor", "v4l-webcam", "usb-serial"]
 nokhwa-webcam = ["nokhwa"]
 v4l-webcam = ["v4l"]
 editor = ["slint"]
@@ -44,7 +44,7 @@ local-ip-address = "0.6.1"
 nusb = "0.1.8"
 futures-lite = "2.3.0"
 serialport = { version="4.4.0", optional = true }
-slint = { version="1.6", optional = true }
+slint = { version="1.7.2", optional = true }
 nokhwa = { version="0.10.4", features = ["input-native"], optional = true }
 human-repr = "1.1.0"
 fast_image_resize = "4.0.0"
@@ -64,7 +64,7 @@ psutil = "3.3.0"
 v4l = { version="0.14.0", default-features = false, features = ["v4l2"], optional = true }
 
 [build-dependencies]
-slint-build = "1.6"
+slint-build = "1.7.2"
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1.12"

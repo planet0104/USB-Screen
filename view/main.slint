@@ -1,6 +1,6 @@
 import { HorizontalBox , ListView, VerticalBox, ScrollView, StandardListView, LineEdit, ComboBox, Slider, Button, StandardButton, CheckBox} from "std-widgets.slint";
 import { AButton, SmallButton } from "widgets/abutton.slint";
-import { Span10px, Screen, WidgetConfig, WidgetObject, WidgetType, ConfirmDialog, ColorPicker } from "widgets/widgets.slint";
+import { Span10px, Screen, WidgetConfig, WidgetObject, WidgetType, ConfirmDialog, ColorPicker, Toast } from "widgets/widgets.slint";
 
 export component CanvasEditor inherits Window{
     title: "USB屏幕编辑器";
@@ -102,6 +102,8 @@ export component CanvasEditor inherits Window{
     in-out property <string> active_widget_type_name: "";
     in-out property <string> font-name: "凤凰点阵";
 
+    in-out property <string> toast-message: "";
+
     callback toggle_startup(bool);
     callback change_screen(int);
     callback change_device(string);
@@ -120,6 +122,7 @@ export component CanvasEditor inherits Window{
     callback update-widget-image();
     callback update-widget-image-color();
     callback new-image-ready();
+    callback screen-uncompress-ready();
     callback select_widget(string);
     callback delete_widget(string);
     callback clone_widget(string);
@@ -626,5 +629,11 @@ export component CanvasEditor inherits Window{
                 }
             }
         }
+    }
+
+    if toast-message != "" : Toast {
+        width: 100%;
+        height: 100%;
+        message: toast-message;
     }
 }

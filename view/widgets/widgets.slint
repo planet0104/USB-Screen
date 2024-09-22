@@ -48,6 +48,39 @@ export struct WidgetObject{
     tag2: string,
 }
 
+export component Toast inherits Rectangle {
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    in-out property <string> message: "请稍候...";
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => {}
+        Rectangle {
+            HorizontalBox {
+                alignment: center;
+                VerticalBox {
+                    alignment: center;
+                    Rectangle {
+                        min-height: 100px;
+                        min-width: 200px;
+                        border-radius: 10px;
+                        background: #333;
+                        Text {
+                            color: white;
+                            text: message;
+                        }
+                    }
+                }
+            }
+            width: 100%;
+            height: 100%;
+        }
+    }
+}
+
+
 export component ConfirmDialog inherits Rectangle {
     in-out property <string> title: "温馨提示";
     in-out property <string> message: "确定要进行此操作吗？";
