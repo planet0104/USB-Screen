@@ -1,6 +1,7 @@
 use anyhow::Result;
 use hex_color::HexColor;
 use image::buffer::ConvertBuffer;
+use image::RgbaImage;
 use image::{imageops::resize, RgbImage};
 use log::{error, info};
 use offscreen_canvas::{OffscreenCanvas, BLUE, WHITE};
@@ -271,17 +272,38 @@ impl CanvasEditorContext {
             }
         }
 
-        //发送到USB屏幕
-        let frame: RgbImage = self.screen.canvas.image_data().convert();
-        std::thread::spawn(move ||{
-            if let Ok(mut screen) = SCREEN.lock(){
-                if let Some(device) = screen.as_mut(){
-                    let _ = device.screen.draw_rgb_image(0,0,&frame);
-                }
-            }
-        });
+        let _ = slint::spawn_local(Self::draw_image_to_usb_screen(self.app.clone(), self.screen.canvas.image_data().clone(), self.screen.rotate_degree));
         //更新最后时间
         self.last_frame_time = Some(Instant::now());
+    }
+
+    async fn draw_image_to_usb_screen(app_clone: Weak<CanvasEditor>, img: RgbaImage, rotate_degree: i32){
+        async_std::task::spawn_blocking(move ||{
+            //发送到USB屏幕
+            let frame: RgbImage = img.convert();
+            let frame = if rotate_degree == 90 {
+                image::imageops::rotate90(&frame)
+            }else if rotate_degree == 180{
+                image::imageops::rotate180(&frame)
+            }else if rotate_degree == 270{
+                image::imageops::rotate270(&frame)
+            }else{
+                frame
+            };
+            if let Ok(mut screen) = SCREEN.lock(){
+                let mut image_too_complete = false;
+                if let Some(device) = screen.as_mut(){
+                    if let Err(err) = device.screen.draw_rgb_image(0,0,&frame){
+                        let err_msg = format!("{err:?}");
+                        image_too_complete =  err_msg.contains("图像太大了");
+                        error!("绘制失败:{err:?}");
+                    }
+                }
+                let _ = app_clone.upgrade_in_event_loop(move |app|{
+                    app.set_image_too_complex(image_too_complete);
+                });
+            }
+        }).await
     }
 
     fn on_mouse_click(&mut self, mouse_x: f32, mouse_y: f32, image_width: f32, image_height: f32) {
@@ -1070,6 +1092,39 @@ impl CanvasEditorContext {
         }
     }
 
+    fn on_change_rotation(&mut self, current_screen_index:i32, rotation_degree: i32) {
+        //旋转支持 0度,90度,180度,270度
+        let mut rotation_degree = rotation_degree + 90;
+        if rotation_degree > 270{
+            rotation_degree = 0;
+        }
+        self.screen.rotate_degree = rotation_degree;
+
+        //绘制横屏时(0度或180度, 对原图做0度或者180度旋转)
+        //绘制竖屏时(0度或90度，对图像做90度，或者270度旋转)
+
+        let app = self.app.unwrap();
+        let screen_size = &self.screens[current_screen_index as usize];
+
+        let (new_width, new_height) = if self.screen.is_vertical(){
+            (screen_size.height, screen_size.width)
+        }else{
+            (screen_size.width, screen_size.height)
+        };
+        app.set_rotation_deg(rotation_degree);
+        app.set_screen_width(new_width as f32);
+        app.set_screen_height(new_height as f32);
+        info!("设置了屏幕方向： rotation_degree={rotation_degree} {new_width}x{new_height}");
+        self.screen.width = new_width;
+        self.screen.height = new_height;
+        //修改画布大小
+        self.screen.canvas = OffscreenCanvas::new(
+            self.screen.width,
+            self.screen.height,
+            self.screen.canvas.font().clone(),
+        );
+    }
+
     fn on_change_screen(&mut self, index: i32) {
         let screen = &self.screens[index as usize];
         
@@ -1213,15 +1268,24 @@ impl CanvasEditorContext {
                 self.on_change_fps(SharedString::from(&fps_str));
                 //更新显示的屏幕大小
                 let app = self.app.unwrap();
+
+                //如果屏幕是竖屏，那么宽度和高度互换
+                let (screen_width, screen_height) = if self.screen.is_vertical(){
+                    (self.screen.height, self.screen.width)
+                }else{
+                    (self.screen.width, self.screen.height)
+                };
+                app.set_rotation_deg(self.screen.rotate_degree);
+                app.set_screen_width(self.screen.width as f32);
+                app.set_screen_height(self.screen.height as f32);
+
                 for s in &self.screens{
-                    if s.width == self.screen.width && s.height == self.screen.height{
+                    if s.width == screen_width && s.height == screen_height{
                         app.set_screen_name(format!(
                             "{ } {}x{}",
                             s.name, s.width, s.height
                         )
                         .into());
-                        app.set_screen_width(s.width as f32);
-                        app.set_screen_height(s.height as f32);
                         break;
                     }
                 }
@@ -1457,7 +1521,7 @@ impl CanvasEditorContext {
 
     fn on_change_fps(&mut self, fps: SharedString) {
         info!("on_change_fps {fps}");
-        let fps = fps.to_string().replace("刷新率:", "").replace("帧/秒", "");
+        let fps = fps.to_string().replace("刷新率:", "").replace("帧", "");
         let mut fps = fps.parse::<f32>().unwrap_or(10.);
         if self.screen.width > 160 && self.screen.height > 128{
             //320x240屏幕最高不超过12帧
@@ -1469,7 +1533,7 @@ impl CanvasEditorContext {
         self.screen.fps = fps;
         let _ = self.screen.setup_monitor();
         let app = self.app.unwrap();
-        app.set_fps(format!("刷新率:{fps}帧/秒").into());
+        app.set_fps(format!("刷新率:{fps}帧").into());
     }
 
 }
@@ -1643,6 +1707,11 @@ pub fn run() -> Result<()> {
     let context_clone = context.clone();
     app.on_change_screen(move |index| {
         context_clone.borrow_mut().on_change_screen(index);
+    });
+
+    let context_clone = context.clone();
+    app.on_change_rotation(move |sindex, index| {
+        context_clone.borrow_mut().on_change_rotation(sindex, index);
     });
 
     let context_clone = context.clone();

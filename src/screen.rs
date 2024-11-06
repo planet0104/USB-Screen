@@ -32,7 +32,8 @@ pub struct SaveableScreen {
     pub device_address: Option<String>,
     pub widgets: Vec<SaveableWidget>,
     pub font: Option<Vec<u8>>,
-    pub font_name: String
+    pub font_name: String,
+    pub rotate_degree: Option<i32>
 }
 
 #[derive(Clone, Encode, Decode, Deserialize, Serialize)]
@@ -54,6 +55,7 @@ pub struct ScreenRender {
     pub font_name: String,
     pub font: Option<Vec<u8>>,
     pub fps: f32,
+    pub rotate_degree: i32,
     pub device_address: Option<String>
 }
 
@@ -70,6 +72,7 @@ impl ScreenRender {
         let font =
             Font::from_bytes(font_file, FontSettings::default()).map_err(|err| anyhow!("{err}"))?;
         Ok(Self {
+            rotate_degree: 0,
             canvas: OffscreenCanvas::new(width, height, font),
             width,
             height,
@@ -80,6 +83,14 @@ impl ScreenRender {
             fps: 10.,
             device_address: None,
         })
+    }
+
+    pub fn is_vertical(&self) -> bool{
+        self.rotate_degree == 90 || self.rotate_degree == 270
+    }
+
+    pub fn is_horizontal(&self) -> bool{
+        self.rotate_degree == 0 || self.rotate_degree == 180
     }
 
     pub fn set_font(&mut self, font_file: Option<&[u8]>, font_name: String) -> Result<()> {
@@ -270,6 +281,7 @@ impl ScreenRender {
         self.width = saveable.width;
         self.height = saveable.height;
         self.fps = saveable.fps;
+        self.rotate_degree = saveable.rotate_degree.unwrap_or(0);
         self.device_address = saveable.device_address;
         self.canvas =
             OffscreenCanvas::new(saveable.width, saveable.height, self.canvas.font().clone());
@@ -351,6 +363,7 @@ impl ScreenRender {
             font = None;
         }
         let mut saveable = SaveableScreen {
+            rotate_degree: Some(self.rotate_degree),
             width: self.width,
             height: self.height,
             model: self.model.clone(),
@@ -389,6 +402,7 @@ impl ScreenRender {
             font = None;
         }
         let mut saveable = SaveableScreen {
+            rotate_degree: Some(self.rotate_degree),
             width: self.width,
             height: self.height,
             model: self.model.clone(),

@@ -88,6 +88,16 @@ fn open_usb_screen(file: String) -> Result<()>{
         last_draw_time = Instant::now();
         render.render();
         let frame: RgbImage = render.canvas.image_data().convert();
+        //旋转
+        let frame = if render.rotate_degree == 90 {
+            image::imageops::rotate90(&frame)
+        }else if render.rotate_degree == 180{
+            image::imageops::rotate180(&frame)
+        }else if render.rotate_degree == 270{
+            image::imageops::rotate270(&frame)
+        }else{
+            frame
+        };
         // let rgb565 = rgb888_to_rgb565_u16(&frame, frame.width() as usize, frame.height() as usize);
         if usb_screen.is_none() {
             std::thread::sleep(Duration::from_millis(2000));
@@ -95,13 +105,13 @@ fn open_usb_screen(file: String) -> Result<()>{
             usb_screen = find_and_open_a_screen();
         } else {
             let screen = usb_screen.as_mut().unwrap();
-            if screen.draw_rgb_image(
+            if let Err(err) = screen.draw_rgb_image(
                 0,
                 0,
                 &frame
             )
-            .is_err()
             {
+                error!("屏幕绘制失败:{err:?}");
                 usb_screen = None;
             }
         }

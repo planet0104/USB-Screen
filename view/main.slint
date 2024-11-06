@@ -12,6 +12,7 @@ export component CanvasEditor inherits Window{
     in-out property <string> screen-name: "ST7735 160x128";
     in-out property <length> screen-width: 160px;
     in-out property <length> screen-height: 128px;
+    in-out property <int> screen-orientation: 0;//0横屏，1竖屏
     in-out property <[string]> screen_names: [
         "ST7789 160x128"
     ];
@@ -19,7 +20,7 @@ export component CanvasEditor inherits Window{
         "未找到"
     ];
     in-out property <string> device_name: "未找到";
-    in-out property <string> fps: "刷新率:10帧/秒";
+    in-out property <string> fps: "刷新率:10帧";
 
     out property <[WidgetType]> widgets: [
         {name: "pointer",  icon: @image-url("../images/icon_pointer.png"), text: "指针" },
@@ -101,11 +102,13 @@ export component CanvasEditor inherits Window{
     in-out property <string> active_widget_image_color_str;
     in-out property <string> active_widget_type_name: "";
     in-out property <string> font-name: "凤凰点阵";
+    in-out property <int> rotation_deg: 0;
 
     in-out property <string> toast-message: "";
 
     callback toggle_startup(bool);
     callback change_screen(int);
+    callback change_rotation(int, int);
     callback change_device(string);
     callback change_fps(string);
     callback save_screen();
@@ -133,6 +136,7 @@ export component CanvasEditor inherits Window{
 
     property <length> color-picker-x: 10px;
     property <length> color-picker-y: 10px;
+    in-out property <bool> image-too-complex;
     in-out property <bool> reg_startup;
     in-out property <brush> picker-color;
     in-out property <float> picker-brightness;
@@ -235,7 +239,7 @@ export component CanvasEditor inherits Window{
                                 height: 24px;
                                 text: "屏幕";
                             }
-                            ComboBox {
+                            screen-size-combo := ComboBox {
                                 height: self.preferred-height*1.8;
                                 model: screen_names;
                                 current-value <=> screen-name;
@@ -272,14 +276,14 @@ export component CanvasEditor inherits Window{
                         HorizontalLayout {
                             padding-top: 5px;
                             Rectangle {}
-                            Text { text: "配置:"; }
+                            Text { vertical-alignment: center; text: "配置:"; }
                             Span10px {}
-                            AButton {height: 26px; width: 95px; icon-opacity: 0.8; text-color: #bbf; icon-colorize: #bbf; use-icon: true; icon: @image-url("../images/icon_font.png"); border-color: #444; text: font-name; clicked => { open_font() } }
+                            AButton { height: 26px; width: 95px; icon-opacity: 0.8; text-color: #bbf; icon-colorize: #bbf; use-icon: true; icon: @image-url("../images/icon_font.png"); border-color: #444; text: font-name; clicked => { open_font() } }
                             Span10px {}
                             ComboBox {
-                                width: 135px;
+                                width: 120px;
                                 height: self.preferred-height*1.8;
-                                model: ["刷新率:0.2帧/秒", "刷新率:0.5帧/秒", "刷新率:1帧/秒", "刷新率:2帧/秒", "刷新率:3帧/秒", "刷新率:4帧/秒", "刷新率:5帧/秒", "刷新率:10帧/秒", "刷新率:15帧/秒"];
+                                model: ["刷新率:0.2帧", "刷新率:0.5帧", "刷新率:1帧", "刷新率:2帧", "刷新率:3帧", "刷新率:4帧", "刷新率:5帧", "刷新率:10帧", "刷新率:15帧"];
                                 current-value <=> fps;
                                 selected(name) => {
                                     fps = name;
@@ -287,7 +291,7 @@ export component CanvasEditor inherits Window{
                                 }
                             }
                             Span10px {}
-                            Text { text: "预览:";}
+                            Text { vertical-alignment: center; text: "预览:";}
                             ComboBox {
                                 height: self.preferred-height*1.8;
                                 model <=> device_list;
@@ -297,6 +301,24 @@ export component CanvasEditor inherits Window{
                                     change_device(device_name);
                                 }
                             }
+                            Span10px {}
+                            Button {
+                                clicked => {
+                                    change_rotation(screen-size-combo.current-index, rotation_deg);
+                                }
+                                text: "旋转:"+rotation_deg+"° ";
+                            }
+                        }
+                    }
+                    if image-too-complex : Rectangle {
+                        height: 15px;
+                    }
+                    if image-too-complex : Rectangle {
+                        height: 26px;
+                        background: rgba(255, 69, 0, 0.5);
+                        border-radius: 15px;
+                        Text {
+                            text: "图像过于复杂，无法绘制。请缩小或减少图像组件！";
                         }
                     }
                     Rectangle {
@@ -309,7 +331,7 @@ export component CanvasEditor inherits Window{
                             }
                         }
                         canvas-touch := TouchArea {
-                            width: (slider.value/100) * parent.width;
+                            width: (slider.value/( (rotation_deg==90||rotation_deg==270)? 200:100)) * parent.width;
                             height: self.width * (screen-height/screen-width);
                             moved => {
                                 mouse-move(canvas-touch.mouse-x/(self.width/screen-width), canvas-touch.mouse-y/(self.width/screen-width), screen-width, screen-height, canvas-touch.pressed)
@@ -325,7 +347,7 @@ export component CanvasEditor inherits Window{
                         }
                         Rectangle {
                             background: #181818;
-                            width: (slider.value/100) * parent.width;
+                            width: (slider.value/( (rotation_deg==90||rotation_deg==270)? 200:100)) * parent.width;
                             height: self.width * (screen-height/screen-width);
                             border-radius: 6px;
                             canvas-image := Image {

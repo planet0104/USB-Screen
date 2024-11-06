@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use futures_lite::future::block_on;
 use image::{Rgb, RgbImage};
 use log::{info, warn};
@@ -7,6 +9,8 @@ use anyhow::{anyhow, Result};
 use serialport::{SerialPort, SerialPortInfo, SerialPortType};
 
 use crate::rgb565::rgb888_to_rgb565_be;
+
+// use crate::rgb565::rgb888_to_rgb565_be;
 
 const BULK_OUT_EP: u8 = 0x01;
 const BULK_IN_EP: u8 = 0x81;
@@ -186,7 +190,12 @@ pub fn draw_rgb_image(x: u16, y: u16, img:&RgbImage, interface:&Interface) -> an
 }
 
 pub fn draw_rgb565(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, interface:&Interface) -> anyhow::Result<()>{
+    // info!("压缩前大小:{}", rgb565.len());
     let rgb565_u8_slice = lz4_flex::compress_prepend_size(rgb565);
+    // info!("压缩后大小:{}", rgb565_u8_slice.len());
+    if rgb565_u8_slice.len() >1024*28 {
+        return Err(anyhow!("图像太大了!"));
+    }
     const IMAGE_AA:u64 = 7596835243154170209;
     const BOOT_USB:u64 = 7093010483740242786;
     const IMAGE_BB:u64 = 7596835243154170466;
@@ -197,14 +206,27 @@ pub fn draw_rgb565(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, interf
     img_begin[10..12].copy_from_slice(&height.to_be_bytes());
     img_begin[12..14].copy_from_slice(&x.to_be_bytes());
     img_begin[14..16].copy_from_slice(&y.to_be_bytes());
-    // println!("draw:{x}x{y} {width}x{height}");
-    block_on(interface.bulk_out(BULK_OUT_EP, img_begin.into())).status?;
+    // info!("绘制:{x}x{y} {width}x{height}");
+    // block_on(interface.bulk_out(BULK_OUT_EP, img_begin.into())).status?;
+    block_on(async {
+        async_std::future::timeout(Duration::from_millis(100), interface.bulk_out(BULK_OUT_EP, img_begin.into()))
+            .await
+    })?.status?;
     //读取
     // let result = block_on(interface.bulk_in(BULK_IN_EP, RequestBuffer::new(64))).data;
     // let msg = String::from_utf8(result)?;
     // println!("{msg}ms");
-    block_on(interface.bulk_out(BULK_OUT_EP, rgb565_u8_slice.into())).status?;
-    block_on(interface.bulk_out(BULK_OUT_EP, IMAGE_BB.to_be_bytes().into())).status?;
+    // block_on(interface.bulk_out(BULK_OUT_EP, rgb565_u8_slice.into())).status?;
+    block_on(async {
+        async_std::future::timeout(Duration::from_millis(100), interface.bulk_out(BULK_OUT_EP, rgb565_u8_slice.into()))
+            .await
+    })?.status?;
+    // block_on(interface.bulk_out(BULK_OUT_EP, IMAGE_BB.to_be_bytes().into())).status?;
+    block_on(async {
+        async_std::future::timeout(Duration::from_millis(100), interface.bulk_out(BULK_OUT_EP, IMAGE_BB.to_be_bytes().into()))
+            .await
+    })?.status?;
+    // info!("绘制成功..");
     Ok(())
 }
 
@@ -214,6 +236,10 @@ pub fn draw_rgb_image_serial(x: u16, y: u16, img:&RgbImage, port:&mut dyn Serial
     let rgb565 = rgb888_to_rgb565_be(&img, img.width() as usize, img.height() as usize);
     draw_rgb565_serial(&rgb565, x, y, img.width() as u16, img.height() as u16, port)
 }
+
+// 320x240屏幕连接到usb，然后在编辑器中一边添加多张gif，一边保存时，有时候rp2040会死机，同时编辑器也会卡死。
+//第一：首先解决usb死机后，软件卡死问题
+//第二：找到硬件代码死机问题，增加判断逻辑
 
 #[cfg(feature = "usb-serial")]
 pub fn draw_rgb565_serial(rgb565:&[u8], x: u16, y: u16, width: u16, height: u16, port:&mut dyn SerialPort) -> anyhow::Result<()>{
