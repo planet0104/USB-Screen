@@ -41,6 +41,18 @@
 ```
 ![st7789.jpg](images/st7789.png)
 
+### ST7789 240x240 接线方式
+```
+    GND   <=> GND
+    VCC   <=> 3V3
+    SCL   <=> PIN6(clk)
+    SDA   <=> PIN7(mosi)
+    RESET <=> PIN14(rst)
+    DC    <=> PIN13
+    CS    <=> PIN9
+    BL    <=> 5V
+```
+
 ## 固件源码
 https://github.com/planet0104/rp2040_usb_screen
 
