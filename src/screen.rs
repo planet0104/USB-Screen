@@ -33,7 +33,9 @@ pub struct SaveableScreen {
     pub widgets: Vec<SaveableWidget>,
     pub font: Option<Vec<u8>>,
     pub font_name: String,
-    pub rotate_degree: Option<i32>
+    pub rotate_degree: Option<i32>,
+    //指定设备IP地址
+    pub device_ip: Option<String>,
 }
 
 #[derive(Clone, Encode, Decode, Deserialize, Serialize)]
@@ -56,7 +58,8 @@ pub struct ScreenRender {
     pub font: Option<Vec<u8>>,
     pub fps: f32,
     pub rotate_degree: i32,
-    pub device_address: Option<String>
+    pub device_address: Option<String>,
+    pub device_ip: Option<String>,
 }
 
 impl ScreenRender {
@@ -82,6 +85,7 @@ impl ScreenRender {
             widgets: vec![],
             fps: 10.,
             device_address: None,
+            device_ip: None,
         })
     }
 
@@ -371,7 +375,8 @@ impl ScreenRender {
             font_name,
             widgets: vec![],
             fps: self.fps,
-            device_address: self.device_address.clone()
+            device_address: self.device_address.clone(),
+            device_ip: self.device_ip.clone(),
         };
         for idx in 0..self.widgets.len() {
             if let Some(widget) = self.widgets[idx].as_any_mut().downcast_mut::<TextWidget>() {
@@ -410,7 +415,8 @@ impl ScreenRender {
             font_name,
             widgets: vec![],
             fps: self.fps,
-            device_address: self.device_address.clone()
+            device_address: self.device_address.clone(),
+            device_ip: self.device_ip.clone()
         };
         for idx in 0..self.widgets.len() {
             if let Some(widget) = self.widgets[idx].as_any_mut().downcast_mut::<TextWidget>() {

@@ -18,6 +18,7 @@ mod nmc;
 mod rgb565;
 mod screen;
 mod usb_screen;
+mod wifi_screen;
 mod utils;
 mod widgets;
 #[cfg(all(not(windows),feature = "v4l-webcam"))]
@@ -236,7 +237,7 @@ pub fn is_run_as_admin() -> Result<bool> {
         System::Threading::{GetCurrentProcess, OpenProcessToken},
     };
     unsafe {
-        let mut token_handle: HANDLE = HANDLE(0);
+        let mut token_handle: HANDLE = HANDLE(std::ptr::null_mut());
         let process_handle = GetCurrentProcess();
 
         // 打开进程令牌
@@ -302,18 +303,18 @@ pub fn run_as_admin(params: Option<&str>) -> Result<()> {
         let mut sh_exec_info = SHELLEXECUTEINFOA {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOA>() as u32,
             fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_DOENVSUBST | SEE_MASK_FLAG_NO_UI,
-            hwnd: HWND(0),
+            hwnd: HWND(std::ptr::null_mut()),
             lpVerb: s!("runas"),
             lpFile: PCSTR::from_raw(exe_path.as_ptr()),
             lpParameters: params_ptr,
             lpDirectory: PCSTR::null(),
             nShow: 0,
-            hInstApp: HINSTANCE(0),
+            hInstApp: HINSTANCE(std::ptr::null_mut()),
             lpIDList: std::ptr::null_mut(),
             lpClass: PCSTR::null(),
-            hkeyClass: HKEY(0),
+            hkeyClass: HKEY(std::ptr::null_mut()),
             dwHotKey: 0,
-            hProcess: HANDLE(0),
+            hProcess: HANDLE(std::ptr::null_mut()),
             Anonymous: SHELLEXECUTEINFOA_0::default(),
         };
 

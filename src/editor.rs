@@ -10,6 +10,7 @@ use slint::private_unstable_api::re_exports::KeyEvent;
 use slint::{
     Brush, Color, Image, Model, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel, Weak,
 };
+use std::net::IpAddr;
 use std::time::Instant;
 use once_cell::sync::Lazy;
 use std::{
@@ -21,7 +22,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{monitor, utils};
+use crate::{monitor, utils, wifi_screen};
 use crate::usb_screen::{self, UsbScreen, UsbScreenInfo};
 use crate::{
     nmc::CITIES,
@@ -30,13 +31,31 @@ use crate::{
     widgets::{ImageData, ImageWidget, TextWidget, Widget},
 };
 
+enum CurrentScreen{
+    USBScreen(CurrentUsbScreen),
+    WiFiScreen(String),
+}
 struct CurrentUsbScreen{
     info: UsbScreenInfo,
     screen: UsbScreen
 }
 
+impl CurrentScreen{
+    fn draw_rgb_image(&mut self, img: &RgbImage) -> Result<()>{
+        match self{
+            Self::USBScreen(usb) => {
+                usb.screen.draw_rgb_image(0,0, img)
+            }
+            Self::WiFiScreen(_) => {
+                let img: RgbaImage = img.convert();
+                wifi_screen::send_message(wifi_screen::Message::Image(img))
+            }
+        }
+    }
+}
+
 // 当前打开的屏幕
-static SCREEN: Lazy<Mutex<Option<CurrentUsbScreen>>> = Lazy::new(|| {
+static SCREEN: Lazy<Mutex<Option<CurrentScreen>>> = Lazy::new(|| {
     Mutex::new(None)
 });
 // 所有屏幕列表
@@ -46,7 +65,6 @@ static ALL_SCREENS: Lazy<Mutex<Vec<UsbScreenInfo>>> = Lazy::new(|| Mutex::new(ve
 static UNCOMPRESSED_SCREEN: Lazy<Mutex<Option<Vec<u8>>>> = Lazy::new(|| {
     Mutex::new(None)
 });
-
 
 slint::include_modules!();
 
@@ -185,15 +203,24 @@ impl CanvasEditorContext {
         //连接当前设备
         if dev_index >= 0{
             let dev = self.devices[dev_index as usize].clone();
+            let app_clone = app.as_weak();
             std::thread::spawn(move ||{
                 if let Ok(mut screen) = SCREEN.lock(){
-                    if screen.is_some() && screen.as_ref().unwrap().info.label == dev.label{
+                    //如果已经连接了wifi屏幕，不再刷新
+                    if let Some(CurrentScreen::WiFiScreen(_)) = screen.as_ref(){
+                        info!("wifi屏幕已打开,不再自动连接设备");
                         return;
+                    }
+                    if let Some(CurrentScreen::USBScreen(s)) = screen.as_ref() {
+                        if s.info.label == dev.label{
+                            info!("已经打开屏幕:{}", dev.label);
+                            return;
+                        }
                     }
     
                     match UsbScreen::open(dev.clone()){
                         Ok(s) => {
-                            screen.replace(CurrentUsbScreen { info: dev.clone(), screen: s });
+                            screen.replace(CurrentScreen::USBScreen(CurrentUsbScreen { info: dev.clone(), screen: s }));
                         }
                         Err(err) => {
                             error!("屏幕打开失败:{:?}", err);
@@ -218,18 +245,16 @@ impl CanvasEditorContext {
                         bottom: rect.bottom,
                     };
 
-                    //进度条按照tag2为宽度
+                    //进度条按照宽高属性绘制
                     if let Some(widget) = widget.as_any_mut().downcast_mut::<TextWidget>() {
                         if widget.type_name != "weather" && widget.type_name != "uptime" && widget.tag1 == "1" {
-                            let width = widget
-                                .tag2
-                                .parse::<i32>()
-                                .unwrap_or(widget.font_size as i32 * 5);
+                            let width = widget.width.unwrap_or(widget.font_size as i32 * 5);
+                            let height = widget.height.unwrap_or(widget.font_size as i32);
                             rect = offscreen_canvas::Rect::from(
                                 rect.left,
                                 rect.top,
                                 width,
-                                rect.height(),
+                                height,
                             );
                         }
                     }
@@ -293,7 +318,7 @@ impl CanvasEditorContext {
             if let Ok(mut screen) = SCREEN.lock(){
                 let mut image_too_complete = false;
                 if let Some(device) = screen.as_mut(){
-                    if let Err(err) = device.screen.draw_rgb_image(0,0,&frame){
+                    if let Err(err) = device.draw_rgb_image(&frame){
                         let err_msg = format!("{err:?}");
                         image_too_complete =  err_msg.contains("图像太大了");
                         error!("绘制失败:{err:?}");
@@ -535,6 +560,25 @@ impl CanvasEditorContext {
         });
     }
 
+    /// 更新空间的 宽和高属性
+    fn on_update_widget_prop_size(&mut self){
+        let app = self.app.unwrap();
+        let prop_width = app.get_active_widget_prop_width();
+        let prop_height = app.get_active_widget_prop_height();
+
+        if let Some(widget) = self
+            .active_widget()
+            .and_then(|w| w.as_any_mut().downcast_mut::<TextWidget>())
+        {
+            if let Ok(width) = prop_width.parse::<i32>(){
+                widget.width = Some(width);
+            }
+            if let Ok(height) = prop_height.parse::<i32>(){
+                widget.height = Some(height);
+            }
+        }
+    }
+
     fn on_update_widget_tags(&mut self) {
         let app = self.app.unwrap();
         let tag1 = app.get_active_widget_tag1();
@@ -755,6 +799,8 @@ impl CanvasEditorContext {
         app.set_active_widget_text(SharedString::from(&widget.text));
         app.set_active_widget_tag1(SharedString::from(&widget.tag1));
         app.set_active_widget_tag2(SharedString::from(&widget.tag2));
+        app.set_active_widget_prop_width(SharedString::from(&widget.width.map(|i| format!("{i}")).unwrap_or(String::new())));
+        app.set_active_widget_prop_height(SharedString::from(&widget.height.map(|i| format!("{i}")).unwrap_or(String::new())));
         app.set_active_widget_font_size(format!("{}", widget.font_size as i32).into());
         app.set_active_widget_prefix(SharedString::from(&widget.prefix));
         app.set_active_widget_color(Color::from_argb_u8(
@@ -1200,10 +1246,23 @@ impl CanvasEditorContext {
         //检查是否有打开的屏幕，并且跟当前屏幕大小一致，保存至配置文件中
         let mut size_fit = false;
         if let Ok(current_device) = SCREEN.lock(){
-            if let Some(screen) = current_device.as_ref(){
-                if screen.info.width == self.screen.width as u16 && screen.info.height == self.screen.height as u16{
-                    self.screen.device_address = Some(screen.info.address.clone());
-                    size_fit = true;
+            match current_device.as_ref(){
+                None => {
+                    self.screen.device_ip = None;
+                }
+                Some(screen) => {
+                    match screen{
+                        CurrentScreen::WiFiScreen(ip) => {
+                            self.screen.device_ip = Some(ip.to_string());
+                        },
+                        CurrentScreen::USBScreen(screen) => {
+                            self.screen.device_ip = None;
+                            if screen.info.width == self.screen.width as u16 && screen.info.height == self.screen.height as u16{
+                                self.screen.device_address = Some(screen.info.address.clone());
+                                size_fit = true;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1492,24 +1551,93 @@ impl CanvasEditorContext {
             }
         });
     }
+    
+    // 编辑了屏幕IP地址，尝试连接Wifi屏幕
+    fn on_update_device_ip(&mut self, device_ip:SharedString){
+        let app = self.app.unwrap();
+        let device_ip = device_ip.to_string();
+        if app.get_is_testing_device_ip(){
+            toast(app.as_weak(),"正在连接,请稍后再试!");
+            return;
+        }
+        let _ip = match IpAddr::from_str(&device_ip){
+            Ok(i) => i,
+            Err(_err) => {
+                toast(app.as_weak(), "请输入正确的IP地址!");
+                return;
+            }
+        };
+        app.set_is_testing_device_ip(true);
+        let app_c = app.as_weak();
+        //尝试连接屏幕
+        std::thread::spawn(move ||{
+            let success = match wifi_screen::test_screen_sync(device_ip.clone()){
+                Ok(()) => {
+                    //测试连接成功
+                    if let Ok(mut screen) = SCREEN.lock(){
+                        //关闭USB屏幕
+                        if let Some(CurrentScreen::USBScreen(s)) = screen.as_ref() {
+                            let _ = screen.take();
+                        }
+
+                        //开始连接屏幕
+                        wifi_screen::send_message(wifi_screen::Message::Connect(device_ip.clone()));
+                        screen.replace(CurrentScreen::WiFiScreen(device_ip.clone()));
+                        true
+                    }else{
+                        toast(app_c.clone(), "出错了, 请重新启动程序!");
+                        false
+                    }
+                }
+                Err(err) =>{
+                    let msg = format!("WiFi屏幕连接失败:{}", err.root_cause());
+                    toast(app_c.clone(), &msg.as_str());
+                    false
+                }
+            };
+            let _ = app_c.upgrade_in_event_loop(move |app|{
+                app.set_is_testing_device_ip(false);
+                if success{
+                    app.set_device_ip(device_ip.into());
+                }
+            });
+        });
+    }
 
     fn on_change_device(&mut self, device: SharedString) {
         info!("on_change_device: {}", device.as_str());
+        //清空IP
+        self.app.unwrap().set_device_ip("".into());
+        self.screen.device_ip = None;
         let devices = self.devices.clone();
+        let app_clone = self.app.clone();
         std::thread::spawn(move ||{
             for dev in devices{
                 if device.as_str().contains(&dev.label){
                     if let Ok(mut screen) = SCREEN.lock(){
-                        if screen.is_some() && screen.as_ref().unwrap().info.label == dev.label{
-                            info!("已经打开屏幕:{}", dev.label);
-                            return;
+
+                        //================== 关闭wifi屏幕 ================
+                        if let Some(CurrentScreen::WiFiScreen(_)) = screen.as_ref(){
+                            if let Err(err) = wifi_screen::send_message(wifi_screen::Message::Disconnect){
+                                error!("断开连接出错:{err:?}");
+                            }
+                            let _ = screen.take();
                         }
+                        //===============================================
+                        
+                        if let Some(CurrentScreen::USBScreen(s)) = screen.as_ref() {
+                            if s.info.label == dev.label{
+                                info!("已经打开屏幕:{}", dev.label);
+                                return;
+                            }
+                        }
+                        
                         match UsbScreen::open(dev.clone()){
                             Ok(s) => {
-                                screen.replace(CurrentUsbScreen { info: dev.clone(), screen: s });
+                                screen.replace(CurrentScreen::USBScreen(CurrentUsbScreen { info: dev.clone(), screen: s }));
                             }
                             Err(err) => {
-                                error!("屏幕打开失败:{:?}", err);
+                                toast(app_clone, &format!("屏幕打开失败:{:?}", err));
                             }
                         }
                     }
@@ -1658,6 +1786,11 @@ pub fn run() -> Result<()> {
     });
 
     let context_clone = context.clone();
+    app.on_update_widget_prop_size(move || {
+        context_clone.borrow_mut().on_update_widget_prop_size();
+    });
+
+    let context_clone = context.clone();
     app.on_new_image_ready(move || {
         context_clone.borrow_mut().on_new_image_ready();
     });
@@ -1752,6 +1885,11 @@ pub fn run() -> Result<()> {
     let context_clone = context.clone();
     app.on_change_device(move |device| {
         context_clone.borrow_mut().on_change_device(device);
+    });
+
+    let context_clone = context.clone();
+    app.on_update_device_ip(move |ip| {
+        context_clone.borrow_mut().on_update_device_ip(ip);
     });
 
     let context_clone = context.clone();

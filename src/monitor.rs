@@ -954,6 +954,10 @@ pub fn local_ip_addresses() -> Option<String> {
 
 #[cfg(windows)]
 fn start_get_cpu_freq_thread() -> std::thread::JoinHandle<()> {
+    use std::ptr::null_mut;
+
+    use windows::Win32::System::Performance::{PDH_HCOUNTER, PDH_HQUERY};
+
     debug!("start_get_cpu_freq_thread...");
     std::thread::spawn(move || {
         //https://stackoverflow.com/questions/61802420/unable-to-get-current-cpu-frequency-in-powershell-or-python
@@ -983,15 +987,15 @@ fn start_get_cpu_freq_thread() -> std::thread::JoinHandle<()> {
                 }
 
                 //打开PDH
-                let mut query = 0;
-                let status = PdhOpenQueryH(0, 0, &mut query);
+                let mut query = PDH_HQUERY(null_mut());
+                let status = PdhOpenQueryH(None, 0, &mut query);
                 if status != ERROR_SUCCESS.0 {
                     std::thread::sleep(delay);
                     continue;
                 }
 
-                let mut cpu_performance = 0;
-                let mut cpu_basic_speed = 0;
+                let mut cpu_performance = PDH_HCOUNTER(null_mut());
+                let mut cpu_basic_speed = PDH_HCOUNTER(null_mut());
 
                 //添加CPU当前性能的计数器
                 let status = PdhAddCounterW(
@@ -1274,6 +1278,10 @@ pub fn start_webcam_capture_thread() -> std::thread::JoinHandle<()> {
 
 #[cfg(windows)]
 pub fn start_disk_counter_thread() -> std::thread::JoinHandle<()> {
+    use std::ptr::null_mut;
+
+    use windows::Win32::System::Performance::{PDH_HCOUNTER, PDH_HQUERY};
+
     debug!("start_disk_counter_thread...");
     std::thread::spawn(move || {
         //https://stackoverflow.com/questions/61802420/unable-to-get-current-cpu-frequency-in-powershell-or-python
@@ -1303,15 +1311,15 @@ pub fn start_disk_counter_thread() -> std::thread::JoinHandle<()> {
                 }
 
                 //打开PDH
-                let mut query = 0;
-                let status = PdhOpenQueryH(0, 0, &mut query);
+                let mut query = PDH_HQUERY(null_mut());
+                let status = PdhOpenQueryH(None, 0, &mut query);
                 if status != ERROR_SUCCESS.0 {
                     std::thread::sleep(delay);
                     continue;
                 }
 
-                let mut read_bytes_per_sec_counter = 0;
-                let mut write_bytes_per_sec_counter = 0;
+                let mut read_bytes_per_sec_counter = PDH_HCOUNTER(null_mut());
+                let mut write_bytes_per_sec_counter = PDH_HCOUNTER(null_mut());
 
                 let status = PdhAddCounterW(
                     query,

@@ -10,7 +10,6 @@ use image::{
 };
 use offscreen_canvas::{OffscreenCanvas, ResizeOption, RotateOption, WHITE};
 use serde::{Deserialize, Serialize};
-use core::prelude::v1;
 use std::any::Any;
 use uuid::Uuid;
 
@@ -159,6 +158,8 @@ pub struct TextWidget {
     pub num_widget: usize,
     pub tag1: String,
     pub tag2: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
 }
 
 impl TextWidget {
@@ -184,6 +185,8 @@ impl TextWidget {
             num_widget: 1,
             tag1: "".to_string(),
             tag2: "".to_string(),
+            width: None,
+            height: None,
         }
     }
 }
@@ -325,15 +328,12 @@ impl Widget for TextWidget {
                 .replace("°C", "")
                 .parse::<f32>()
                 .unwrap_or(0.);
-            let width = self
-                .tag2
-                .parse::<i32>()
-                .unwrap_or(self.font_size as i32 * 5);
+            let width = self.width.unwrap_or(self.font_size as i32 * 5);
+            let height = self.height.unwrap_or(self.font_size as i32);
             let mut rect_width = (width as f32 * (percent / 100.)) as i32;
             if rect_width <= 0 {
                 rect_width = 1;
             }
-            //字体作为高度
             if self.font_size <= 2. {
                 self.font_size = 2.;
             }
@@ -341,7 +341,7 @@ impl Widget for TextWidget {
                 self.position.left,
                 self.position.top,
                 rect_width,
-                self.font_size as i32,
+                height,
             );
             context.fill_rect(rect, Rgba(self.color));
         } else {

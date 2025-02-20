@@ -82,7 +82,7 @@ export component CanvasEditor inherits Window{
     in-out property <int> widget_type_index: 0;
     out property <string> widget_type_name: "";
     out property <string> widget_type_label: "";
-    in-out property <float> screen-scale: 1.4;
+    in-out property <float> screen-scale: 1.2;
     in property <image> canvas-frame <=> canvas-image.source;
 
     in-out property <string> active_widget_uuid: "1";
@@ -98,17 +98,23 @@ export component CanvasEditor inherits Window{
     in-out property <string> active_widget_color_str;
     in-out property <string> active_widget_tag1;
     in-out property <string> active_widget_tag2;
+    //单独添加的字段，用于存放进度条宽高，或者其他宽高
+    in-out property <string> active_widget_prop_width;
+    in-out property <string> active_widget_prop_height;
     in-out property <image> active_widget_image;
     in-out property <string> active_widget_image_color_str;
-    in-out property <string> active_widget_type_name: "";
+    in-out property <string> active_widget_type_name: "memory_percent";
     in-out property <string> font-name: "凤凰点阵";
     in-out property <int> rotation_deg: 0;
+    in-out property <string> device_ip: "";
+    in-out property <bool> is_testing_device_ip: false;
 
     in-out property <string> toast-message: "";
 
     callback toggle_startup(bool);
     callback change_screen(int);
     callback change_rotation(int, int);
+    callback update_device_ip(string);
     callback change_device(string);
     callback change_fps(string);
     callback save_screen();
@@ -122,6 +128,7 @@ export component CanvasEditor inherits Window{
     callback update-widget-text();
     callback update-widget-text-color();
     callback update-widget-tags();
+    callback update-widget-prop-size();
     callback update-widget-image();
     callback update-widget-image-color();
     callback new-image-ready();
@@ -300,6 +307,18 @@ export component CanvasEditor inherits Window{
                                     device_name = name;
                                     change_device(device_name);
                                 }
+                            }
+                            Span10px {}
+                            Text { vertical-alignment: center; text: "IP:";}
+                            LineEdit {
+                                width: 90px;
+                                text <=> device_ip;
+                            }
+                            Button {
+                                clicked => {
+                                    update_device_ip(device_ip);
+                                }
+                                text: "连接";
                             }
                             Span10px {}
                             Button {
@@ -521,7 +540,7 @@ export component CanvasEditor inherits Window{
                                     }
                                 }
                             }
-                            //带有百分比的控件，tag1="1"代表进度条，其他代表普通文本，tag2代表进度条宽度(字体代表进度条高度)
+                            //带有百分比的控件，tag1="1"代表进度条，其他代表普通文本
                             if active_widget_type_name == "memory_percent"
                                 || active_widget_type_name == "swap_percent"
                                 || active_widget_type_name == "cpu_usage"
@@ -550,7 +569,9 @@ export component CanvasEditor inherits Window{
                                         padding-top: 5px;
                                         padding-bottom: 0px;
                                         Text { text: "宽度:"; width: 40px; }
-                                        LineEdit { width: 50px; height: 20px; text <=> active_widget_tag2; input-type: text; edited => { update-widget-tags() } }
+                                        LineEdit { width: 50px; height: 20px; text <=> active_widget_prop_width; input-type: text; edited => { update-widget-prop-size() } }
+                                        Text { text: "高度:"; width: 40px; }
+                                        LineEdit { width: 50px; height: 20px; text <=> active_widget_prop_height; input-type: text; edited => { update-widget-prop-size() } }
                                     }
                             }
 
