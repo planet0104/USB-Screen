@@ -287,6 +287,7 @@ impl ScreenRender {
         self.fps = saveable.fps;
         self.rotate_degree = saveable.rotate_degree.unwrap_or(0);
         self.device_address = saveable.device_address;
+        self.device_ip = saveable.device_ip;
         self.canvas =
             OffscreenCanvas::new(saveable.width, saveable.height, self.canvas.font().clone());
         if let Some(font) = saveable.font {
@@ -311,7 +312,10 @@ impl ScreenRender {
         let saveable: Result<(SaveableScreenV10, usize), bincode::error::DecodeError> =
             bincode::decode_from_slice(&uncompressed, bincode::config::standard());
         if saveable.is_err(){
+            info!("读取v2配置...");
             return Self::new_from_file_v2(&uncompressed);
+        }else{
+            info!("读取v1配置...");
         }
         let (saveable, _) = saveable?;
         let model = saveable.model;
@@ -345,6 +349,7 @@ impl ScreenRender {
         }
         render.fps = saveable.fps;
         render.device_address = saveable.device_address;
+        render.device_ip = saveable.device_ip;
         render.widgets.clear();
         for w in saveable.widgets {
             match w {
@@ -435,6 +440,7 @@ impl ScreenRender {
 
     pub fn saveable_to_compressed_json(saveable: &SaveableScreen) -> Result<Vec<u8>>{
         let json = serde_json::to_string(&saveable)?;
+        // info!("保存:{json}");
         let contents = json.as_bytes();
         info!("压缩前:{}k", contents.len() / 1024);
         //压缩

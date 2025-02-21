@@ -11,7 +11,7 @@ use slint::{
     Brush, Color, Image, Model, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel, Weak,
 };
 use std::net::IpAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use std::{
     cell::RefCell,
@@ -22,6 +22,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::wifi_screen::StatusInfo;
 use crate::{monitor, utils, wifi_screen};
 use crate::usb_screen::{self, UsbScreen, UsbScreenInfo};
 use crate::{
@@ -1337,6 +1338,9 @@ impl CanvasEditorContext {
                 app.set_rotation_deg(self.screen.rotate_degree);
                 app.set_screen_width(self.screen.width as f32);
                 app.set_screen_height(self.screen.height as f32);
+                if let Some(ip) = self.screen.device_ip.as_ref(){
+                    app.set_device_ip(SharedString::from(ip));
+                }
 
                 for s in &self.screens{
                     if s.width == screen_width && s.height == screen_height{
@@ -1401,10 +1405,10 @@ impl CanvasEditorContext {
         if let Some(file) = dlg.pick_file() {
             std::thread::spawn(move ||{
                 match ScreenRender::decompress_screen_file(file){
-                    Ok(uncompressed_sceen) => {
+                    Ok(uncompressed_screen) => {
                         hide_loading(app_clone.clone());
                         if let Ok(mut us) = UNCOMPRESSED_SCREEN.lock(){
-                            us.replace(uncompressed_sceen);
+                            us.replace(uncompressed_screen);
                             let _ = app_clone.upgrade_in_event_loop(move |app| {
                                 app.invoke_screen_uncompress_ready();
                             });
@@ -1556,6 +1560,7 @@ impl CanvasEditorContext {
     fn on_update_device_ip(&mut self, device_ip:SharedString){
         let app = self.app.unwrap();
         let device_ip = device_ip.to_string();
+        self.screen.device_ip.replace(device_ip.clone());
         if app.get_is_testing_device_ip(){
             toast(app.as_weak(),"正在连接,请稍后再试!");
             return;
@@ -1576,13 +1581,25 @@ impl CanvasEditorContext {
                     //测试连接成功
                     if let Ok(mut screen) = SCREEN.lock(){
                         //关闭USB屏幕
-                        if let Some(CurrentScreen::USBScreen(s)) = screen.as_ref() {
+                        if let Some(CurrentScreen::USBScreen(_)) = screen.as_ref() {
                             let _ = screen.take();
                         }
 
                         //开始连接屏幕
-                        wifi_screen::send_message(wifi_screen::Message::Connect(device_ip.clone()));
+                        let _ = wifi_screen::send_message(wifi_screen::Message::Connect(device_ip.clone()));
                         screen.replace(CurrentScreen::WiFiScreen(device_ip.clone()));
+                        let app_c_clone = app_c.clone();
+                        std::thread::spawn(move ||{
+                            for _ in 0..10{
+                                std::thread::sleep(Duration::from_secs(1));
+                                if let Ok(status) = wifi_screen::get_status(){
+                                    if let wifi_screen::Status::Connected = status.status{
+                                        toast(app_c_clone, "连接成功!");
+                                        break;
+                                    }
+                                }
+                            }
+                        });
                         true
                     }else{
                         toast(app_c.clone(), "出错了, 请重新启动程序!");

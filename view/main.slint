@@ -304,22 +304,29 @@ export component CanvasEditor inherits Window{
                                 model <=> device_list;
                                 current-value <=> device_name;
                                 selected(name) => {
-                                    device_name = name;
-                                    change_device(device_name);
+                                    // device_name = name;
+                                    // change_device(device_name);
                                 }
                             }
                             Span10px {}
                             Text { vertical-alignment: center; text: "IP:";}
-                            LineEdit {
+                            txt_device_ip := LineEdit {
                                 width: 90px;
                                 text <=> device_ip;
                             }
-                            Button {
-                                clicked => {
-                                    update_device_ip(device_ip);
+                            if is_testing_device_ip :
+                                Button {
+                                    enabled: false;
+                                    text: "连接";
                                 }
-                                text: "连接";
-                            }
+                            if !is_testing_device_ip :
+                                Button {
+                                    clicked => {
+                                        update_device_ip(txt_device_ip.text);
+                                    }
+                                    text: "连接";
+                                }
+                            
                             Span10px {}
                             Button {
                                 clicked => {
@@ -516,7 +523,7 @@ export component CanvasEditor inherits Window{
                                 padding-top: 5px;
                                 padding-bottom: 0px;
                                 Text { text: "字号:"; width: 40px; }
-                                LineEdit { width: 30px; height: 20px; text <=> active_widget_font_size; input-type: text; edited => { update-widget-text() } }
+                                LineEdit { width: 60px; height: 20px; text <=> active_widget_font_size; input-type: text; edited => { update-widget-text() } }
                             }
                             if active_widget_type_name != "images" && active_widget_type_name != "webcam" : HorizontalBox {
                                 padding-top: 5px;

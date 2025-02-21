@@ -44,7 +44,13 @@ local-ip-address = "0.6.3"
 nusb = "0.1.12"
 futures-lite = "2.6.0"
 serialport = { version="4.7.0", optional = true }
-slint = { version="1.9.2", optional = true }
+slint = { version="1.9.2", optional = true, default-features = false, features = [
+  "std",
+  "backend-default",
+  "renderer-femtovg",
+  "renderer-software",
+  "compat-1-2",
+] }
 nokhwa = { version="0.10.7", features = ["input-native"], optional = true }
 human-repr = "1.1.0"
 fast_image_resize = "5.1.1"

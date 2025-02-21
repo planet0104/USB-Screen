@@ -5,10 +5,12 @@
         "amap",
         "argb",
         "blit",
+        "codegen",
         "consts",
         "COUNTERVALUE",
         "DOENVSUBST",
         "feelst",
+        "femtovg",
         "HINSTANCE",
         "hkey",
         "HWND",
@@ -22,13 +24,18 @@
         "PCSTR",
         "psutil",
         "rcomfort",
+        "repr",
         "runas",
+        "serde",
         "SHELLEXECUTEINFOA",
+        "tungstenite",
         "Uninit",
         "Vonwaon",
         "winapi",
         "winddirection",
-        "windpower"
+        "windpower",
+        "winres",
+        "YUYV"
     ],
     "dotnet.preferCSharpExtension": true
 }

@@ -70,11 +70,21 @@ fn main() -> Result<()> {
 }
 
 fn open_usb_screen(file: String) -> Result<()>{
+    info!("打开屏幕文件:{file}");
     let f = std::fs::read(file)?;
     let mut render = ScreenRender::new_from_file(&f)?;
 
     render.setup_monitor()?;
-    let mut usb_screen = usb_screen::find_and_open_a_screen();
+    
+    let mut usb_screen = None;
+
+    if let Some(ip) = render.device_ip.as_ref(){
+        info!("设置了ip地址，使用wifi屏幕..");
+    }else {
+        info!("未设置ip地址，使用 USB屏幕...");
+        usb_screen = usb_screen::find_and_open_a_screen();
+    }
+
     info!("USB Screen是否已打开: {}", usb_screen.is_some());
     let mut last_draw_time = Instant::now();
     let frame_duration = (1000./render.fps) as u128;
@@ -100,20 +110,39 @@ fn open_usb_screen(file: String) -> Result<()>{
             frame
         };
         // let rgb565 = rgb888_to_rgb565_u16(&frame, frame.width() as usize, frame.height() as usize);
-        if usb_screen.is_none() {
-            std::thread::sleep(Duration::from_millis(2000));
-            info!("open USB Screen...");
-            usb_screen = find_and_open_a_screen();
-        } else {
-            let screen = usb_screen.as_mut().unwrap();
-            if let Err(err) = screen.draw_rgb_image(
-                0,
-                0,
-                &frame
-            )
-            {
-                error!("屏幕绘制失败:{err:?}");
-                usb_screen = None;
+        if let Some(ip) = render.device_ip.as_ref(){
+            //连接wifi屏幕
+            if let Ok(wifi_scr_status) = wifi_screen::get_status(){
+                match wifi_scr_status.status{
+                    wifi_screen::Status::NotConnected | wifi_screen::Status::ConnectFail
+                    | wifi_screen::Status::Disconnected => {
+                        std::thread::sleep(Duration::from_secs(2));
+                        let _ = wifi_screen::send_message(wifi_screen::Message::Connect(ip.to_string()));
+                    }
+                    wifi_screen::Status::Connected => {
+                        let _ = wifi_screen::send_message(wifi_screen::Message::Image(frame.convert()));
+                    }
+                    wifi_screen::Status::Connecting => {
+                        
+                    }
+                }
+            }
+        }else{
+            if usb_screen.is_none() {
+                std::thread::sleep(Duration::from_millis(2000));
+                info!("open USB Screen...");
+                usb_screen = find_and_open_a_screen();
+            } else {
+                let screen = usb_screen.as_mut().unwrap();
+                if let Err(err) = screen.draw_rgb_image(
+                    0,
+                    0,
+                    &frame
+                )
+                {
+                    error!("屏幕绘制失败:{err:?}");
+                    usb_screen = None;
+                }
             }
         }
     }
