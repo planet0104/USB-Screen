@@ -3,6 +3,7 @@ use std::{net::{Ipv4Addr, TcpStream}, sync::Mutex, time::{Duration, Instant}};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use fast_image_resize::{images::Image, Resizer};
 use image::{buffer::ConvertBuffer, imageops::overlay, RgbImage, RgbaImage};
+use log::info;
 use once_cell::sync::Lazy;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -13,8 +14,8 @@ use crate::rgb565::rgb888_to_rgb565_be;
 #[derive(Serialize, Deserialize, Debug)]
 struct DisplayConfig{
     display_type: Option<String>,
-    width: u32,
-    height: u32
+    rotated_width: u32,
+    rotated_height: u32
 }
 
 pub enum Message{
@@ -174,7 +175,7 @@ fn start(receiver: Receiver<Message>){
                             }
                         }
                         let (dst_width, dst_height) = match display_config.as_ref(){
-                            Some(c) => (c.width, c.height),
+                            Some(c) => (c.rotated_width, c.rotated_height),
                             None => continue,
                         };
                         
@@ -198,12 +199,14 @@ fn start(receiver: Receiver<Message>){
                                 };
                                 let out = rgb888_to_rgb565_be(&img, img.width() as usize, img.height() as usize);
                                 let out = lz4_flex::compress_prepend_size(&out);
-                                println!("resize+转rgb565+lz4压缩:{}ms {}bytes", t1.elapsed().as_millis(), out.len());
+                                println!("resize+转rgb565+lz4压缩:{}ms {}bytes {}x{}", t1.elapsed().as_millis(), out.len(), img.width(), img.height());
 
                                 //发送
                                 let ret1 = s.write(tungstenite::Message::Binary(out.into()));
                                 let ret2 = s.flush();
                                 if ret1.is_err() && ret2.is_err(){
+                                    info!("ws write:{ret1:?}");
+                                    info!("ws flush:{ret2:?}");
                                     connected = false;
                                     let _ = socket.take();
                                 }
@@ -275,7 +278,7 @@ fn fast_resize(src: &mut RgbaImage, dst_width: u32, dst_height: u32) -> Result<R
 pub fn test_screen_sync(ip: String) -> Result<()>{
     let resp = reqwest::blocking::get(&format!("http://{ip}/display_config"))?
         .json::<DisplayConfig>()?;
-    println!("屏幕大小:{}x{}", resp.width, resp.height);
+    println!("屏幕大小:{}x{}", resp.rotated_width, resp.rotated_height);
     //显示hello
     let json = r#"[{"Rectangle":{"fill_color":"black","height":240,"width":240,"stroke_width":0,"left":0,"top":0}},{"Text":{"color":"white","size":20,"text":"Hello!","x":10,"y":15}},{"Text":{"color":"white","size":20,"text":"USB Screen","x":10,"y":40}}]"#;
     //绘制

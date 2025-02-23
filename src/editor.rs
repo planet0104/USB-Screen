@@ -103,6 +103,11 @@ impl CanvasEditorContext {
             height: 128,
         },
         ScreenSize {
+            name: "ST7735S".into(),
+            width: 80,
+            height: 160,
+        },
+        ScreenSize {
             name: "ST7735".into(),
             width: 128,
             height: 128,
@@ -116,6 +121,21 @@ impl CanvasEditorContext {
             name: "ST7789".into(),
             width: 240,
             height: 240,
+        },
+        ScreenSize {
+            name: "ST7789".into(),
+            width: 240,
+            height: 320,
+        },
+        ScreenSize {
+            name: "ST7789V".into(),
+            width: 135,
+            height: 240,
+        },
+        ScreenSize {
+            name: "ST7796".into(),
+            width: 320,
+            height: 480,
         }];
 
         let screen_names = Rc::new(VecModel::from(
@@ -307,6 +327,7 @@ impl CanvasEditorContext {
         async_std::task::spawn_blocking(move ||{
             //发送到USB屏幕
             let frame: RgbImage = img.convert();
+            info!("rotate_degree==={rotate_degree} 旋转之前:{}x{}", frame.width(), frame.height());
             let frame = if rotate_degree == 90 {
                 image::imageops::rotate90(&frame)
             }else if rotate_degree == 180{
@@ -316,6 +337,7 @@ impl CanvasEditorContext {
             }else{
                 frame
             };
+            info!("rotate_degree==={rotate_degree} 旋转之后:{}x{}", frame.width(), frame.height());
             if let Ok(mut screen) = SCREEN.lock(){
                 let mut image_too_complete = false;
                 if let Some(device) = screen.as_mut(){
@@ -1139,7 +1161,7 @@ impl CanvasEditorContext {
         }
     }
 
-    fn on_change_rotation(&mut self, current_screen_index:i32, rotation_degree: i32) {
+    fn on_change_rotation(&mut self, rotation_degree: i32) {
         //旋转支持 0度,90度,180度,270度
         let mut rotation_degree = rotation_degree + 90;
         if rotation_degree > 270{
@@ -1151,13 +1173,23 @@ impl CanvasEditorContext {
         //绘制竖屏时(0度或90度，对图像做90度，或者270度旋转)
 
         let app = self.app.unwrap();
-        let screen_size = &self.screens[current_screen_index as usize];
-
+        let screen_size = match self.screens.iter().filter_map(|v|{
+            if format_screen_name_label(v) == app.get_screen_name().to_string(){
+                Some(v)
+            }else{
+                None
+            }
+        }).next(){
+            Some(s)=>s,
+            None => return
+        };
+        info!("旋转前大小:{}x{}", screen_size.width, screen_size.height);
         let (new_width, new_height) = if self.screen.is_vertical(){
             (screen_size.height, screen_size.width)
         }else{
             (screen_size.width, screen_size.height)
         };
+        info!("旋转后的大小:{new_width}x{new_height}");
         app.set_rotation_deg(rotation_degree);
         app.set_screen_width(new_width as f32);
         app.set_screen_height(new_height as f32);
@@ -1310,7 +1342,6 @@ impl CanvasEditorContext {
 
     /// 从线程中解压数据后，通过 app传递事件来调用此方法加载屏幕
     fn load_screen_from_uncompressed(&mut self){
-        let app_clone = self.app.clone();
         let file = match UNCOMPRESSED_SCREEN.lock(){
             Ok(mut v) => {
                 let v = v.take();
@@ -1335,6 +1366,7 @@ impl CanvasEditorContext {
                 }else{
                     (self.screen.width, self.screen.height)
                 };
+                
                 app.set_rotation_deg(self.screen.rotate_degree);
                 app.set_screen_width(self.screen.width as f32);
                 app.set_screen_height(self.screen.height as f32);
@@ -1344,11 +1376,7 @@ impl CanvasEditorContext {
 
                 for s in &self.screens{
                     if s.width == screen_width && s.height == screen_height{
-                        app.set_screen_name(format!(
-                            "{ } {}x{}",
-                            s.name, s.width, s.height
-                        )
-                        .into());
+                        app.set_screen_name(format_screen_name_label(&s).into());
                         break;
                     }
                 }
@@ -1683,6 +1711,13 @@ impl CanvasEditorContext {
 
 }
 
+fn format_screen_name_label(s: &ScreenSize) -> String{
+    format!(
+        "{ } {}x{}",
+        s.name, s.width, s.height
+    )
+}
+
 pub fn run() -> Result<()> {
     let app = CanvasEditor::new().unwrap();
     let mut context = CanvasEditorContext::new(app.as_weak());
@@ -1860,8 +1895,8 @@ pub fn run() -> Result<()> {
     });
 
     let context_clone = context.clone();
-    app.on_change_rotation(move |sindex, index| {
-        context_clone.borrow_mut().on_change_rotation(sindex, index);
+    app.on_change_rotation(move |index| {
+        context_clone.borrow_mut().on_change_rotation(index);
     });
 
     let context_clone = context.clone();

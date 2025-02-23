@@ -350,6 +350,7 @@ impl ScreenRender {
         render.fps = saveable.fps;
         render.device_address = saveable.device_address;
         render.device_ip = saveable.device_ip;
+        render.rotate_degree = saveable.rotate_degree.unwrap_or(0);
         render.widgets.clear();
         for w in saveable.widgets {
             match w {

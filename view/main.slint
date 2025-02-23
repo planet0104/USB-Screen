@@ -113,7 +113,7 @@ export component CanvasEditor inherits Window{
 
     callback toggle_startup(bool);
     callback change_screen(int);
-    callback change_rotation(int, int);
+    callback change_rotation(int);
     callback update_device_ip(string);
     callback change_device(string);
     callback change_fps(string);
@@ -330,7 +330,7 @@ export component CanvasEditor inherits Window{
                             Span10px {}
                             Button {
                                 clicked => {
-                                    change_rotation(screen-size-combo.current-index, rotation_deg);
+                                    change_rotation(rotation_deg);
                                 }
                                 text: "旋转:"+rotation_deg+"° ";
                             }
