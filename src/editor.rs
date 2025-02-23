@@ -327,7 +327,6 @@ impl CanvasEditorContext {
         async_std::task::spawn_blocking(move ||{
             //发送到USB屏幕
             let frame: RgbImage = img.convert();
-            info!("rotate_degree==={rotate_degree} 旋转之前:{}x{}", frame.width(), frame.height());
             let frame = if rotate_degree == 90 {
                 image::imageops::rotate90(&frame)
             }else if rotate_degree == 180{
@@ -337,7 +336,6 @@ impl CanvasEditorContext {
             }else{
                 frame
             };
-            info!("rotate_degree==={rotate_degree} 旋转之后:{}x{}", frame.width(), frame.height());
             if let Ok(mut screen) = SCREEN.lock(){
                 let mut image_too_complete = false;
                 if let Some(device) = screen.as_mut(){
