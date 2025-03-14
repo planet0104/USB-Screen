@@ -547,7 +547,7 @@ export component CanvasEditor inherits Window{
                                     }
                                 }
                             }
-                            //带有百分比的控件，tag1="1"代表进度条，其他代表普通文本
+                            //带有百分比的控件，tag1="1"代表进度条，tag1="2"代表垂直进度条, 其他代表普通文本
                             if active_widget_type_name == "memory_percent"
                                 || active_widget_type_name == "swap_percent"
                                 || active_widget_type_name == "cpu_usage"
@@ -564,7 +564,7 @@ export component CanvasEditor inherits Window{
                                         ComboBox {
                                             width: self.preferred-width*1.4;
                                             height: self.preferred-height*1.5;
-                                            model: ["文字", "进度条"];
+                                            model: ["文字", "进度条", "垂直条"];
                                             current-value: "文字";
                                             selected => {
                                                 active_widget_tag1 = self.current-index;

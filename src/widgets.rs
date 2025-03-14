@@ -110,6 +110,12 @@ impl Rect {
         self.top = center_y - height / 2;
         self.bottom = center_y + height / 2;
     }
+
+    // 设置矩形的尺寸（宽高）
+    pub fn set_width_and_height(&mut self, width: i32, height: i32) {
+        self.right = self.left + width;
+        self.bottom = self.top + height;
+    }
 }
 
 pub trait Widget {
@@ -320,7 +326,7 @@ impl Widget for TextWidget {
             x -= self.font_size as i32 / 2;
             y -= self.font_size as i32 / 2;
             context.draw_image_at(&ICONS[img_idx], x, y, Some(o), None);
-        } else if self.type_name != "weather" && self.type_name != "uptime" && self.tag1 == "1" {
+        } else if self.type_name != "weather" && self.type_name != "uptime" && (self.tag1 == "1" || self.tag1 == "2") {
             //是否渲染成进度条
             let percent = self
                 .text
@@ -328,30 +334,58 @@ impl Widget for TextWidget {
                 .replace("°C", "")
                 .parse::<f32>()
                 .unwrap_or(0.);
+
             let width = self.width.unwrap_or(self.font_size as i32 * 5);
             let height = self.height.unwrap_or(self.font_size as i32);
-            let mut rect_width = (width as f32 * (percent / 100.)) as i32;
-            if rect_width <= 0 {
-                rect_width = 1;
+
+            //水平进度条
+            if self.tag1 == "1" {
+                let mut rect_width = (width as f32 * (percent / 100.)) as i32;
+                if rect_width <= 0 {
+                    rect_width = 1;
+                }
+                if self.font_size <= 2. {
+                    self.font_size = 2.;
+                }
+                let rect = offscreen_canvas::Rect::from(
+                    self.position.left,
+                    self.position.top,
+                    rect_width,
+                    height,
+                );
+                context.fill_rect(rect, Rgba(self.color));
+            }else{
+                //垂直进度条
+                let mut rect_height = (height as f32 * (percent / 100.)) as i32;
+                if rect_height <= 0 {
+                    rect_height = 1;
+                }
+                if self.font_size <= 2. {
+                    self.font_size = 2.;
+                }
+                let rect = offscreen_canvas::Rect::from(
+                    self.position.left,
+                    self.position.top+(height-rect_height),
+                    width,
+                    rect_height,
+                );
+                context.fill_rect(rect, Rgba(self.color));
             }
-            if self.font_size <= 2. {
-                self.font_size = 2.;
-            }
-            let rect = offscreen_canvas::Rect::from(
-                self.position.left,
-                self.position.top,
-                rect_width,
-                height,
-            );
-            context.fill_rect(rect, Rgba(self.color));
         } else {
             if self.font_size <= 4. {
                 self.font_size = 4.;
             }
             let text = format!("{}{}", self.prefix, self.text);
             let text_rect = context.measure_text(&text, self.font_size);
-            self.position
-                .set_size(text_rect.width(), text_rect.height());
+            let width = self.width.unwrap_or(text_rect.width());
+            let height = self.height.unwrap_or(text_rect.height());
+            if self.width.is_some(){
+                //居左方式调整文本位置
+                self.position.set_width_and_height(width, height);
+            }else{
+                //居中方式调整文本位置
+                self.position.set_size(width, height);
+            }
             context.draw_text(
                 &text,
                 Rgba(self.color),

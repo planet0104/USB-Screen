@@ -1,6 +1,6 @@
 [package]
 name = "USB-Screen"
-version = "1.1.7"
+version = "1.1.8"
 edition = "2021"
 
 [features]
@@ -10,6 +10,8 @@ edition = "2021"
 default = ["editor", "tray", "nokhwa-webcam", "usb-serial"]
 # x86_64 linux
 # default = ["editor", "v4l-webcam", "usb-serial"]
+# 飞牛OS
+# default = ["v4l-webcam", "usb-serial"]
 nokhwa-webcam = ["nokhwa"]
 v4l-webcam = ["v4l"]
 editor = ["slint"]

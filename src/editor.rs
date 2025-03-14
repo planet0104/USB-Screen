@@ -268,7 +268,7 @@ impl CanvasEditorContext {
 
                     //进度条按照宽高属性绘制
                     if let Some(widget) = widget.as_any_mut().downcast_mut::<TextWidget>() {
-                        if widget.type_name != "weather" && widget.type_name != "uptime" && widget.tag1 == "1" {
+                        if widget.type_name != "weather" && widget.type_name != "uptime" && (widget.tag1 == "1" || widget.tag1 == "2") {
                             let width = widget.width.unwrap_or(widget.font_size as i32 * 5);
                             let height = widget.height.unwrap_or(widget.font_size as i32);
                             rect = offscreen_canvas::Rect::from(
@@ -597,6 +597,9 @@ impl CanvasEditorContext {
             if let Ok(height) = prop_height.parse::<i32>(){
                 widget.height = Some(height);
             }
+            let w = widget.width.unwrap_or(widget.font_size as i32 * 5);
+            let h = widget.height.unwrap_or(widget.font_size as i32);
+            widget.position_mut().set_size(w, h);
         }
     }
 
@@ -758,6 +761,7 @@ impl CanvasEditorContext {
                 .widgets
                 .iter()
                 .filter_map(|v| {
+                    println!("当前的控件位置:{:?}", v.position());
                     if v.position().contain(x, y) {
                         Some(v.id().to_string())
                     } else {
@@ -1228,7 +1232,7 @@ impl CanvasEditorContext {
                     .downcast_mut::<TextWidget>()
                 {
                     //重新设置进度条设置宽度
-                    if widget.type_name != "weather" && widget.type_name != "uptime" && widget.tag1 == "1"{
+                    if widget.type_name != "weather" && widget.type_name != "uptime" && (widget.tag1 == "1" || widget.tag1 == "2"){
                         let tag2 = widget.tag2.clone();
                         let width = tag2.parse::<f32>().unwrap_or(widget.font_size * 5.);
                         widget.tag2 = format!("{}", (width_scale * width) as i32);

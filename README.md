@@ -130,3 +130,26 @@ sh run.sh
 ## v4l2-ctl  --list-formats -d /dev/video0
 ## v4l2-ctl --list-formats-ext -d /dev/video0
 ```
+
+## 飞牛私有云 fnOS 编译
+
+```bash
+# 切换到root模式
+sudo -i
+# 首先安装rust
+# ...
+# 飞牛OS编译前需要升级libc6=2.36-9+deb12u9
+sudo apt-get install aptitude
+aptitude install libc6=2.36-9+deb12u9
+apt install build-essential
+#安装依赖库
+apt install pkg-config
+sudo apt-get install -y libclang-dev libv4l-dev libudev-dev
+# 打开x86_64 linux编译特征
+# ！！注意关闭 editor特征！！
+# x86_64 linux
+# default = ["v4l-webcam", "usb-serial"]
+# 克隆然后编译
+rm Cargo.lock
+cargo build --release
+```
