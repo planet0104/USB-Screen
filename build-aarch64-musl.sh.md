@@ -4,11 +4,12 @@
 # [features]
 # default = ["v4l-webcam", "usb-serial"]
 #
-# cargo install cross --git https://github.com/cross-rs/cross
 
 # 启动docker后运行
 # 复制出来再运行
 bash
+rm Cargo.lock
+cargo install cross --git https://github.com/cross-rs/cross
 cross build --target aarch64-unknown-linux-musl --release
 
 # openwrp配置花生壳教程

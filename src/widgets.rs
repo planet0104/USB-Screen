@@ -1,21 +1,21 @@
 use crate::{
     monitor::{self, system_uptime, webcam_frame},
     nmc::ICONS,
-    utils::{degrees_to_radians, resize_image, test_resize_image},
+    utils::{degrees_to_radians, register_app_for_startup::execute_user_command, resize_image, test_resize_image},
 };
 use anyhow::Result;
-use bincode::{Decode, Encode};
 use image::{
     buffer::ConvertBuffer, imageops::{resize, FilterType}, Rgba, RgbaImage
 };
+use log::info;
 use offscreen_canvas::{OffscreenCanvas, ResizeOption, RotateOption, WHITE};
 use serde::{Deserialize, Serialize};
-use std::any::Any;
+use std::{any::Any, sync::{atomic::{AtomicPtr, Ordering}, Arc}, time::Instant};
 use uuid::Uuid;
 
 static DEFAULT_IMAGE: &[u8] = include_bytes!("../images/icon_photo.png");
 
-#[derive(Debug, Clone, Default, Encode, Decode, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Rect {
     pub left: i32,
     pub top: i32,
@@ -149,7 +149,13 @@ pub trait Widget {
     }
 }
 
-#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+#[derive(Clone)]
+pub struct CustomScriptStatus{
+    pub loading: bool,
+    pub result: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
 pub struct TextWidget {
     pub id: String,
     pub text: String,
@@ -166,6 +172,11 @@ pub struct TextWidget {
     pub tag2: String,
     pub width: Option<i32>,
     pub height: Option<i32>,
+    //自定义内容脚本(执行脚本后，获取到数据)
+    pub custom_script: Option<String>,
+    //这是执行命令完成后获得的数据
+    #[serde(skip_serializing, skip_deserializing)]
+    pub custom_script_data: Arc<AtomicPtr<CustomScriptStatus>>
 }
 
 impl TextWidget {
@@ -175,6 +186,7 @@ impl TextWidget {
     }
 
     pub fn new_with_text(x: i32, y: i32, type_name: &str, type_label: &str, text: &str) -> Self {
+        
         Self {
             id: Uuid::new_v4().to_string(),
             text: text.to_string(),
@@ -193,125 +205,179 @@ impl TextWidget {
             tag2: "".to_string(),
             width: None,
             height: None,
+            custom_script: None,
+            custom_script_data: Arc::new(AtomicPtr::new(Box::into_raw(Box::new(CustomScriptStatus{ loading: false, result: String::new() }))))
         }
+    }
+
+    pub fn execute_user_command(&self, command:String, mut old_data: CustomScriptStatus){
+        if old_data.loading{
+            return;
+        }
+        // 启动子线程，每秒更新 JSON 数据
+        let data_clone = Arc::clone(&self.custom_script_data);
+        std::thread::spawn(move || {
+            {
+                //锁定
+                old_data.loading = true;
+                let new_data = Box::into_raw(Box::new(old_data.clone()));
+                let old_data = data_clone.swap(new_data, Ordering::SeqCst);
+                unsafe {
+                    let _ = Box::from_raw(old_data); // 释放旧数据
+                }
+            }
+            // let t = Instant::now();
+            let result = format!("{}", execute_user_command(&command).unwrap_or(String::from("脚本运行失败"))).replace("\r\n", "").replace("\n", "").replace("\r", "");
+            // info!("脚本执行时间:{}ms {result}", t.elapsed().as_millis());
+            {
+                old_data.loading = false;
+                old_data.result = result;
+                let new_data = Box::into_raw(Box::new(old_data));
+                let old_data = data_clone.swap(new_data, Ordering::SeqCst);
+                unsafe {
+                    let _ = Box::from_raw(old_data);
+                }
+            }
+        });
     }
 }
 
 impl Widget for TextWidget {
     fn draw(&mut self, context: &mut OffscreenCanvas) {
-        if self.type_name != "text" {
-            if let Some(text) = match self.type_name.as_str() {
-                "cpu" => monitor::cpu_brand(),
-                "memory" => monitor::memory_info(),
-                "memory_total" => monitor::memory_total(),
-                "memory_percent" => monitor::memory_percent(),
-                "swap" => monitor::swap_info(),
-                "swap_percent" => monitor::swap_percent(),
-                "system" => monitor::system_name(),
-                "version" => monitor::os_version(),
-                "kernel" => monitor::kernel_version(),
-                "host" => monitor::host_name(),
-                "cpu_freq" => monitor::cpu_clock_speed(None),
-                "cpu_usage" => {
-                    if self.num_widget == 1 {
-                        monitor::cpu_usage()
-                    } else {
-                        monitor::cpu_usage_percpu(self.num_widget_index)
-                    }
-                }
-                "cpu_temp." => {
-                    Some(monitor::cpu_temperature().unwrap_or(monitor::EMPTY_STRING.to_string()))
-                }
-                "cpu_cores_power" => {
-                    Some(monitor::cpu_cores_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
-                }
-                "cpu_package_power" => {
-                    Some(monitor::cpu_package_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
-                }
-                "cpu_fan" => Some(monitor::cpu_fan().unwrap_or(monitor::EMPTY_STRING.to_string())),
-                "gpu_fan" => Some(
-                    monitor::gpu_fan(self.num_widget_index)
-                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
-                ),
-                "gpu_clock" => Some(
-                    monitor::gpu_clocks(self.num_widget_index)
-                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
-                ),
-                "gpu_load" => Some(
-                    monitor::gpu_load(self.num_widget_index)
-                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
-                ),
-                "gpu_memory_load" => Some(
-                    monitor::gpu_memory_load(self.num_widget_index)
-                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
-                ),
-                "gpu_memory_total_mb" => Some(
-                    monitor::gpu_memory_total_mb(self.num_widget_index)
-                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
-                ),
-                "gpu_memory_total_gb" => Some(
-                    monitor::gpu_memory_total_gb(self.num_widget_index)
-                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
-                ),
-                "gpu_temp." => Some(
-                    monitor::gpu_temperature(self.num_widget_index)
-                        .unwrap_or(monitor::EMPTY_STRING.to_string()),
-                ),
-                "gpu_cores_power" => {
-                    Some(monitor::gpu_cores_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
-                }
-                "gpu_package_power" => {
-                    Some(monitor::gpu_package_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
-                }
-                "num_cpu" => monitor::num_cpus(),
-                "num_process" => monitor::num_process(),
-                "disk_usage" => monitor::disk_usage(self.num_widget_index),
-                "date" => Some(monitor::date()),
-                "local_ip" => monitor::local_ip_addresses(),
-                "net_ip" => monitor::net_ip_address(),
-                "net_ip_info" => monitor::net_ip_info(),
-                "time" => Some(monitor::time()),
-                "weekday" => Some(monitor::chinese_weekday()),
-                "lunar_year" => Some(monitor::lunar_year()),
-                "lunar_date" => Some(monitor::lunar_date()),
-                "weather" => match monitor::weather_info() {
-                    None => Some(monitor::EMPTY_STRING.to_string()),
-                    Some(w) => {
-                        match self.tag1.as_str() {
-                            "1" => Some(format!("{}", w.station.city)),         //城市
-                            "2" => Some(format!("{}℃", w.weather.temperature)), //气温
-                            "3" => Some(format!("{}℃", w.wind.direct)),         //风向
-                            "4" => Some(format!("{}", w.wind.power)),           //风力
-                            "5" => Some(format!("{}级", w.wind.speed)),         //风级
-                            "6" => Some(format!("{}", w.weather.img)),          //图标
-                            _ => Some(format!("{}", w.weather.info)),
+        
+        let mut custom_script = None;
+        if let Some(script) = self.custom_script.as_ref(){
+            if script.trim().len() > 0{
+                custom_script = Some(script);
+            }
+        }
+        // 从自定义脚本中获取text
+        if let Some(command) = custom_script{
+            let ptr = self.custom_script_data.load(Ordering::SeqCst);
+            if ptr.is_null(){
+                self.custom_script_data = Arc::new(AtomicPtr::new(Box::into_raw(Box::new(CustomScriptStatus{ loading: false, result: String::new() }))));
+                return;
+            }
+            let custom_script_status = unsafe { &*ptr }; // 安全地解引用原子指针
+            if !custom_script_status.loading{
+                self.execute_user_command(command.clone(), custom_script_status.clone());
+            }
+            self.text = custom_script_status.result.clone();
+        }else{
+            if self.type_name != "text" {
+                if let Some(text) = match self.type_name.as_str() {
+                    "cpu" => monitor::cpu_brand(),
+                    "memory" => monitor::memory_info(),
+                    "memory_total" => monitor::memory_total(),
+                    "memory_percent" => monitor::memory_percent(),
+                    "swap" => monitor::swap_info(),
+                    "swap_percent" => monitor::swap_percent(),
+                    "system" => monitor::system_name(),
+                    "version" => monitor::os_version(),
+                    "kernel" => monitor::kernel_version(),
+                    "host" => monitor::host_name(),
+                    "cpu_freq" => monitor::cpu_clock_speed(None),
+                    "cpu_usage" => {
+                        if self.num_widget == 1 {
+                            monitor::cpu_usage()
+                        } else {
+                            monitor::cpu_usage_percpu(self.num_widget_index)
                         }
                     }
-                },
-                "uptime" => {
-                    let uptime = system_uptime();
-                    let uptime_str = match self.tag1.as_str() {
-                        //运行分钟数
-                        "1" => Some(format!("{}", uptime.minutes)),
-                        //运行小时数
-                        "2" => Some(format!("{}", uptime.hours)),
-                        //运行天数
-                        "3" => Some(format!("{}", uptime.days)),
-                        //运行秒数
-                        _ => Some(format!("{}", uptime.seconds)),
-                    };
-                    uptime_str
-                },
-                "disk_read_speed" => monitor::disk_speed_per_sec().map(|(r, _w)| r),
-                "disk_write_speed" => monitor::disk_speed_per_sec().map(|(_r, w)| w),
-                "received_speed" => monitor::network_speed_per_sec().map(|(r, _t)| r),
-                "transmitted_speed" => monitor::network_speed_per_sec().map(|(_r, t)| t),
-                _ => None,
-            } {
-                if self.text != text && text != monitor::EMPTY_STRING {
-                    self.text = text;
+                    "cpu_temp." => {
+                        Some(monitor::cpu_temperature().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                    }
+                    "cpu_cores_power" => {
+                        Some(monitor::cpu_cores_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                    }
+                    "cpu_package_power" => {
+                        Some(monitor::cpu_package_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                    }
+                    "cpu_fan" => Some(monitor::cpu_fan().unwrap_or(monitor::EMPTY_STRING.to_string())),
+                    "gpu_fan" => Some(
+                        monitor::gpu_fan(self.num_widget_index)
+                            .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                    ),
+                    "gpu_clock" => Some(
+                        monitor::gpu_clocks(self.num_widget_index)
+                            .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                    ),
+                    "gpu_load" => Some(
+                        monitor::gpu_load(self.num_widget_index)
+                            .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                    ),
+                    "gpu_memory_load" => Some(
+                        monitor::gpu_memory_load(self.num_widget_index)
+                            .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                    ),
+                    "gpu_memory_total_mb" => Some(
+                        monitor::gpu_memory_total_mb(self.num_widget_index)
+                            .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                    ),
+                    "gpu_memory_total_gb" => Some(
+                        monitor::gpu_memory_total_gb(self.num_widget_index)
+                            .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                    ),
+                    "gpu_temp." => Some(
+                        monitor::gpu_temperature(self.num_widget_index)
+                            .unwrap_or(monitor::EMPTY_STRING.to_string()),
+                    ),
+                    "gpu_cores_power" => {
+                        Some(monitor::gpu_cores_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                    }
+                    "gpu_package_power" => {
+                        Some(monitor::gpu_package_power().unwrap_or(monitor::EMPTY_STRING.to_string()))
+                    }
+                    "num_cpu" => monitor::num_cpus(),
+                    "num_process" => monitor::num_process(),
+                    "disk_usage" => monitor::disk_usage(self.num_widget_index),
+                    "date" => Some(monitor::date()),
+                    "local_ip" => monitor::local_ip_addresses(),
+                    "net_ip" => monitor::net_ip_address(),
+                    "net_ip_info" => monitor::net_ip_info(),
+                    "time" => Some(monitor::time()),
+                    "weekday" => Some(monitor::chinese_weekday()),
+                    "lunar_year" => Some(monitor::lunar_year()),
+                    "lunar_date" => Some(monitor::lunar_date()),
+                    "weather" => match monitor::weather_info() {
+                        None => Some(monitor::EMPTY_STRING.to_string()),
+                        Some(w) => {
+                            match self.tag1.as_str() {
+                                "1" => Some(format!("{}", w.station.city)),         //城市
+                                "2" => Some(format!("{}℃", w.weather.temperature)), //气温
+                                "3" => Some(format!("{}℃", w.wind.direct)),         //风向
+                                "4" => Some(format!("{}", w.wind.power)),           //风力
+                                "5" => Some(format!("{}级", w.wind.speed)),         //风级
+                                "6" => Some(format!("{}", w.weather.img)),          //图标
+                                _ => Some(format!("{}", w.weather.info)),
+                            }
+                        }
+                    },
+                    "uptime" => {
+                        let uptime = system_uptime();
+                        let uptime_str = match self.tag1.as_str() {
+                            //运行分钟数
+                            "1" => Some(format!("{}", uptime.minutes)),
+                            //运行小时数
+                            "2" => Some(format!("{}", uptime.hours)),
+                            //运行天数
+                            "3" => Some(format!("{}", uptime.days)),
+                            //运行秒数
+                            _ => Some(format!("{}", uptime.seconds)),
+                        };
+                        uptime_str
+                    },
+                    "disk_read_speed" => monitor::disk_speed_per_sec().map(|(r, _w)| r),
+                    "disk_write_speed" => monitor::disk_speed_per_sec().map(|(_r, w)| w),
+                    "received_speed" => monitor::network_speed_per_sec().map(|(r, _t)| r),
+                    "transmitted_speed" => monitor::network_speed_per_sec().map(|(_r, t)| t),
+                    _ => None,
+                } {
+                    if self.text != text && text != monitor::EMPTY_STRING {
+                        self.text = text;
+                    }
                 }
-            }
+            }    
         }
 
         //天气渲染成图标
@@ -433,7 +499,7 @@ impl Widget for TextWidget {
     }
 }
 
-#[derive(Default, Clone, Encode, Decode, Deserialize, Serialize)]
+#[derive(Default, Clone, Deserialize, Serialize)]
 pub struct ImageData {
     pub width: u32,
     pub height: u32,
@@ -506,7 +572,7 @@ impl ImageData {
     }
 }
 
-#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct ImageWidget {
     pub id: String,
     pub image_data: ImageData,
@@ -668,7 +734,7 @@ impl Widget for ImageWidget {
     }
 }
 
-#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub enum SaveableWidget {
     TextWidget(TextWidget),
     ImageWidget(ImageWidget),
@@ -678,13 +744,13 @@ pub enum SaveableWidget {
 pub mod v10{
     use super::*;
 
-    #[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+    #[derive(Clone, Deserialize, Serialize)]
     pub enum SaveableWidget {
         TextWidget(super::TextWidget),
         ImageWidget(ImageWidget),
     }
 
-    #[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+    #[derive(Clone, Deserialize, Serialize)]
     pub struct ImageWidget {
         pub id: String,
         pub image_data: ImageData,

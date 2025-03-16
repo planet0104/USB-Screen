@@ -6,7 +6,6 @@ use crate::{
     widgets::{ImageWidget, SaveableWidget, TextWidget, Widget},
 };
 use anyhow::{anyhow, Result};
-use bincode::{Decode, Encode};
 use log::info;
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use offscreen_canvas::{Font, FontSettings, OffscreenCanvas, BLACK};
@@ -21,7 +20,7 @@ pub struct ScreenSize {
     pub height: u32,
 }
 
-#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct SaveableScreen {
     pub width: u32,
     pub height: u32,
@@ -38,7 +37,7 @@ pub struct SaveableScreen {
     pub device_ip: Option<String>,
 }
 
-#[derive(Clone, Encode, Decode, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct SaveableScreenV10 {
     pub width: u32,
     pub height: u32,
@@ -244,36 +243,7 @@ impl ScreenRender {
 
     //尝试使用bindcode解析老版本screen文件
     pub fn load_from_file(&mut self, uncompressed: Vec<u8>) -> Result<()> {
-        
-        let saveable: Result<(SaveableScreenV10, usize), bincode::error::DecodeError> =
-            bincode::decode_from_slice(&uncompressed, bincode::config::standard());
-
-        //解析失败尝试使用V2解析
-        if saveable.is_err(){
-            self.load_from_file_v2(&uncompressed)?;
-            return Ok(());
-        }
-        
-        let (saveable, _) = saveable?;
-        self.width = saveable.width;
-        self.height = saveable.height;
-        self.canvas =
-            OffscreenCanvas::new(saveable.width, saveable.height, self.canvas.font().clone());
-        if let Some(font) = saveable.font {
-            self.set_font(Some(&font), saveable.font_name)?;
-        }
-        self.widgets.clear();
-        for w in saveable.widgets {
-            match w {
-                crate::widgets::v10::SaveableWidget::TextWidget(txt) => {
-                    self.widgets.push(Box::new(txt));
-                }
-                crate::widgets::v10::SaveableWidget::ImageWidget(img) => {
-                    self.widgets.push(Box::new(ImageWidget::from_v10(img)));
-                }
-            }
-        }
-        Ok(())
+        self.load_from_file_v2(&uncompressed)
     }
 
     //使用json解析screen文件
@@ -309,33 +279,7 @@ impl ScreenRender {
 
     pub fn new_from_file(file: &[u8]) -> Result<ScreenRender> {
         let uncompressed = decompress_size_prepended(&file)?;
-        let saveable: Result<(SaveableScreenV10, usize), bincode::error::DecodeError> =
-            bincode::decode_from_slice(&uncompressed, bincode::config::standard());
-        if saveable.is_err(){
-            info!("读取v2配置...");
-            return Self::new_from_file_v2(&uncompressed);
-        }else{
-            info!("读取v1配置...");
-        }
-        let (saveable, _) = saveable?;
-        let model = saveable.model;
-        let mut render =
-            ScreenRender::new(model, saveable.width, saveable.height, None, String::new())?;
-        if let Some(font) = saveable.font {
-            render.set_font(Some(&font), saveable.font_name)?;
-        }
-        render.widgets.clear();
-        for w in saveable.widgets {
-            match w {
-                crate::widgets::v10::SaveableWidget::TextWidget(txt) => {
-                    render.widgets.push(Box::new(txt));
-                }
-                crate::widgets::v10::SaveableWidget::ImageWidget(img) => {
-                    render.widgets.push(Box::new(ImageWidget::from_v10(img)));
-                }
-            }
-        }
-        Ok(render)
+        return Self::new_from_file_v2(&uncompressed);
     }
 
     pub fn new_from_file_v2(uncompressed: &[u8]) -> Result<ScreenRender> {

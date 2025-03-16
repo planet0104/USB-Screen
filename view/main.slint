@@ -1,13 +1,27 @@
-import { HorizontalBox , ListView, VerticalBox, ScrollView, StandardListView, LineEdit, ComboBox, Slider, Button, StandardButton, CheckBox} from "std-widgets.slint";
+import { HorizontalBox , ListView, VerticalBox, ScrollView, StandardListView, LineEdit, TextEdit, ComboBox, Slider, Button, StandardButton, CheckBox} from "std-widgets.slint";
 import { AButton, SmallButton } from "widgets/abutton.slint";
 import { Span10px, Screen, WidgetConfig, WidgetObject, WidgetType, ConfirmDialog, ColorPicker, Toast } from "widgets/widgets.slint";
+
+export component CustomScriptDialog inherits Dialog {
+    title: "自定义脚本示例";
+    icon: @image-url("../images/monitor.png");
+    VerticalBox {
+      Text { text: "CMD获取当前日期:"; }
+      TextInput { read-only: true; color: blueviolet; text: "echo %date:~0,4%/%date:~5,2%/%date:~8,2%"; }
+      Text { text: "Powershell获取CPU使用率:"; }
+      TextInput { read-only: true; color: blueviolet; text: "powershell -command \"(Get-WmiObject Win32_Processor | Select-Object -ExpandProperty LoadPercentage).ToString() + '%'\""; }
+      Text { text: "Linux Shell获取当前CPU使用率:"; }
+      TextInput { read-only: true; color: blueviolet; text: "top -bn1 | grep \"Cpu(s)\" | awk '{printf \"%.0f%%\\n\", 100 - $8}'"; }
+    }
+    StandardButton { kind: ok; }
+}
 
 export component CanvasEditor inherits Window{
     title: "USB屏幕编辑器";
     icon: @image-url("../images/monitor.png");
     background: #202124;
     min-width: 700px;
-    min-height: 500px;
+    min-height: 540px;
 
     in-out property <string> screen-name: "ST7735 160x128";
     in-out property <length> screen-width: 160px;
@@ -101,6 +115,8 @@ export component CanvasEditor inherits Window{
     //单独添加的字段，用于存放进度条宽高，或者其他宽高
     in-out property <string> active_widget_prop_width;
     in-out property <string> active_widget_prop_height;
+    //自定义内容脚本
+    in-out property <string> active_widget_custom_script;
     in-out property <image> active_widget_image;
     in-out property <string> active_widget_image_color_str;
     in-out property <string> active_widget_type_name: "memory_percent";
@@ -129,6 +145,8 @@ export component CanvasEditor inherits Window{
     callback update-widget-text-color();
     callback update-widget-tags();
     callback update-widget-prop-size();
+    callback update-widget-custom-script();
+    callback show-custom-script-dialog();
     callback update-widget-image();
     callback update-widget-image-color();
     callback new-image-ready();
@@ -580,6 +598,13 @@ export component CanvasEditor inherits Window{
                                         Text { text: "高度:"; width: 40px; }
                                         LineEdit { width: 50px; height: 20px; text <=> active_widget_prop_height; input-type: text; edited => { update-widget-prop-size() } }
                                     }
+                            }
+
+                            VerticalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                HorizontalLayout {Text { width: 100px; height: 20px; text: "自定义内容脚本:";} AButton{ text: "说明"; clicked => { show-custom-script-dialog() } }}
+                                TextEdit {padding-top: 0px; max-height: 60px; padding-bottom: 0px; font-size: 12px; text <=> active_widget_custom_script; edited => { update-widget-custom-script() } }
                             }
 
                             //天气控件 tag1代表显示类型, tag2代表城市名称

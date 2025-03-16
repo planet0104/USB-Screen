@@ -507,6 +507,24 @@ impl CanvasEditorContext {
         self.list_model.set_row_data(idx, model);
     }
 
+    
+    fn on_update_widget_custom_script(&mut self) {
+        let app = self.app.unwrap();
+        let script = app.get_active_widget_custom_script();
+        let script = script.to_string();
+        info!("更新了自定义脚本:{script}");
+
+        let widget = match self
+            .active_widget()
+            .and_then(|w| w.as_any_mut().downcast_mut::<TextWidget>())
+        {
+            None => return,
+            Some(v) => v,
+        };
+
+        widget.custom_script = Some(script);
+    }
+
     pub fn find_widget_model(&mut self, uuid: &str) -> Option<(usize, WidgetObject)> {
         self.list_model
             .iter()
@@ -824,6 +842,7 @@ impl CanvasEditorContext {
         app.set_active_widget_text(SharedString::from(&widget.text));
         app.set_active_widget_tag1(SharedString::from(&widget.tag1));
         app.set_active_widget_tag2(SharedString::from(&widget.tag2));
+        app.set_active_widget_custom_script(SharedString::from(widget.custom_script.as_ref().unwrap_or(&String::new())));
         app.set_active_widget_prop_width(SharedString::from(&widget.width.map(|i| format!("{i}")).unwrap_or(String::new())));
         app.set_active_widget_prop_height(SharedString::from(&widget.height.map(|i| format!("{i}")).unwrap_or(String::new())));
         app.set_active_widget_font_size(format!("{}", widget.font_size as i32).into());
@@ -1796,6 +1815,17 @@ pub fn run() -> Result<()> {
             .on_mouse_click(mouse_x, mouse_y, image_width, image_height);
     });
 
+    app.on_show_custom_script_dialog(move ||{
+        if let Ok(dialog) = CustomScriptDialog::new(){
+            let _ = dialog.run();
+            // 处理对话框的“确定”按钮点击事件
+            let dialog_weak = dialog.as_weak();
+            dialog.on_ok_clicked(move || {
+                let _ = dialog_weak.unwrap().hide();
+            });
+        }
+    });
+
     let context_clone = context.clone();
     app.on_mouse_move(
         move |mouse_x, mouse_y, image_width, image_height, pressed: bool| {
@@ -1812,6 +1842,11 @@ pub fn run() -> Result<()> {
     let context_clone = context.clone();
     app.on_update_widget_position(move || {
         context_clone.borrow_mut().on_update_widget_position();
+    });
+
+    let context_clone = context.clone();
+    app.on_update_widget_custom_script(move ||{
+        context_clone.borrow_mut().on_update_widget_custom_script();
     });
 
     let context_clone = context.clone();
