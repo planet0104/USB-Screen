@@ -1,16 +1,15 @@
 use crate::{
     monitor::{self, system_uptime, webcam_frame},
     nmc::ICONS,
-    utils::{degrees_to_radians, register_app_for_startup::execute_user_command, resize_image, test_resize_image},
+    utils::{degrees_to_radians, execute_user_command, resize_image, test_resize_image},
 };
 use anyhow::Result;
 use image::{
     buffer::ConvertBuffer, imageops::{resize, FilterType}, Rgba, RgbaImage
 };
-use log::info;
 use offscreen_canvas::{OffscreenCanvas, ResizeOption, RotateOption, WHITE};
 use serde::{Deserialize, Serialize};
-use std::{any::Any, sync::{atomic::{AtomicPtr, Ordering}, Arc}, time::Instant};
+use std::{any::Any, sync::{atomic::{AtomicPtr, Ordering}, Arc}};
 use uuid::Uuid;
 
 static DEFAULT_IMAGE: &[u8] = include_bytes!("../images/icon_photo.png");

@@ -1,6 +1,42 @@
-use std::path::PathBuf;
+use std::{io, path::PathBuf, process::{Command, Stdio}};
 
 use image::{imageops::FilterType, RgbaImage};
+
+pub fn execute_user_command(command: &str) -> io::Result<String> {
+    let output = if cfg!(target_os = "windows") {
+        // 如果是 PowerShell 命令（以 `powershell` 开头），使用 `powershell.exe`
+        if command.trim().to_lowercase().starts_with("powershell") {
+            Command::new("powershell")
+                .args(&["-Command", command.trim()])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()?
+        } else {
+            // 否则使用 `cmd.exe`
+            Command::new("cmd")
+                .args(&["/C", command.trim()])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()?
+        }
+    } else {
+        // Linux/macOS 使用 `sh`
+        Command::new("sh")
+            .arg("-c")
+            .arg(command.trim())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()?
+    };
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(stdout)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(io::Error::new(io::ErrorKind::Other, stderr))
+    }
+}
 
 pub fn degrees_to_radians(degrees: f32) -> f32 {
     degrees * std::f32::consts::PI / 180.0
@@ -87,8 +123,7 @@ pub fn get_font_name(ttf: PathBuf, max_char: usize) -> anyhow::Result<String> {
 #[cfg(windows)]
 pub mod register_app_for_startup{
     use anyhow::{anyhow, Result};
-    use std::process::{Command, Stdio};
-    use std::{io, path::Path};
+    use std::path::Path;
     use std::io::Write;
     use windows::Win32::{
         Foundation::MAX_PATH,
@@ -136,41 +171,5 @@ IconFile=--
         let path = String::from_utf16(&path)?.replace("\u{0}", "");
         std::fs::remove_file(format!("{}\\{}.url", path, app_name))?;
         Ok(())
-    }
-
-    pub fn execute_user_command(command: &str) -> io::Result<String> {
-        let output = if cfg!(target_os = "windows") {
-            // 如果是 PowerShell 命令（以 `powershell` 开头），使用 `powershell.exe`
-            if command.trim().to_lowercase().starts_with("powershell") {
-                Command::new("powershell")
-                    .args(&["-Command", command.trim()])
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .output()?
-            } else {
-                // 否则使用 `cmd.exe`
-                Command::new("cmd")
-                    .args(&["/C", command.trim()])
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .output()?
-            }
-        } else {
-            // Linux/macOS 使用 `sh`
-            Command::new("sh")
-                .arg("-c")
-                .arg(command.trim())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()?
-        };
-    
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            Ok(stdout)
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Err(io::Error::new(io::ErrorKind::Other, stderr))
-        }
     }
 }
