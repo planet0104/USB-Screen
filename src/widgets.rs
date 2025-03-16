@@ -7,9 +7,10 @@ use anyhow::Result;
 use image::{
     buffer::ConvertBuffer, imageops::{resize, FilterType}, Rgba, RgbaImage
 };
+use log::error;
 use offscreen_canvas::{OffscreenCanvas, ResizeOption, RotateOption, WHITE};
 use serde::{Deserialize, Serialize};
-use std::{any::Any, sync::{atomic::{AtomicPtr, Ordering}, Arc}};
+use std::{any::Any, sync::{atomic::{AtomicPtr, Ordering}, Arc, Mutex}};
 use uuid::Uuid;
 
 static DEFAULT_IMAGE: &[u8] = include_bytes!("../images/icon_photo.png");
@@ -148,7 +149,7 @@ pub trait Widget {
     }
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct CustomScriptStatus{
     pub loading: bool,
     pub result: String,
@@ -175,7 +176,7 @@ pub struct TextWidget {
     pub custom_script: Option<String>,
     //这是执行命令完成后获得的数据
     #[serde(skip_serializing, skip_deserializing)]
-    pub custom_script_data: Arc<AtomicPtr<CustomScriptStatus>>
+    pub custom_script_data: Arc<Mutex<CustomScriptStatus>>
 }
 
 impl TextWidget {
@@ -205,37 +206,39 @@ impl TextWidget {
             width: None,
             height: None,
             custom_script: None,
-            custom_script_data: Arc::new(AtomicPtr::new(Box::into_raw(Box::new(CustomScriptStatus{ loading: false, result: String::new() }))))
+            custom_script_data: Arc::new(Mutex::new(CustomScriptStatus{ loading: false, result: String::new()}))
         }
     }
 
-    pub fn execute_user_command(&self, command:String, mut old_data: CustomScriptStatus){
-        if old_data.loading{
-            return;
-        }
+    pub fn execute_user_command(&self, command:String){
         // 启动子线程，每秒更新 JSON 数据
-        let data_clone = Arc::clone(&self.custom_script_data);
+        let data_clone = self.custom_script_data.clone();
         std::thread::spawn(move || {
             {
                 //锁定
-                old_data.loading = true;
-                let new_data = Box::into_raw(Box::new(old_data.clone()));
-                let old_data = data_clone.swap(new_data, Ordering::SeqCst);
-                unsafe {
-                    let _ = Box::from_raw(old_data); // 释放旧数据
-                }
+                let mut data = match data_clone.lock(){
+                    Err(err) => {
+                        error!("custom_script_data lock error:{err:?}");
+                        return;
+                    }
+                    Ok(v) => v
+                };
+                data.loading = true;
             }
             // let t = Instant::now();
             let result = format!("{}", execute_user_command(&command).unwrap_or(String::from("脚本运行失败"))).replace("\r\n", "").replace("\n", "").replace("\r", "");
             // info!("脚本执行时间:{}ms {result}", t.elapsed().as_millis());
             {
-                old_data.loading = false;
-                old_data.result = result;
-                let new_data = Box::into_raw(Box::new(old_data));
-                let old_data = data_clone.swap(new_data, Ordering::SeqCst);
-                unsafe {
-                    let _ = Box::from_raw(old_data);
-                }
+                //锁定
+                let mut data = match data_clone.lock(){
+                    Err(err) => {
+                        error!("custom_script_data lock error:{err:?}");
+                        return;
+                    }
+                    Ok(v) => v
+                };
+                data.loading = false;
+                data.result = result;
             }
         });
     }
@@ -252,16 +255,12 @@ impl Widget for TextWidget {
         }
         // 从自定义脚本中获取text
         if let Some(command) = custom_script{
-            let ptr = self.custom_script_data.load(Ordering::SeqCst);
-            if ptr.is_null(){
-                self.custom_script_data = Arc::new(AtomicPtr::new(Box::into_raw(Box::new(CustomScriptStatus{ loading: false, result: String::new() }))));
-                return;
+            if let Ok(custom_script_data) = self.custom_script_data.try_lock(){
+                if !custom_script_data.loading{
+                    self.execute_user_command(command.clone());
+                }
+                self.text = custom_script_data.result.clone();
             }
-            let custom_script_status = unsafe { &*ptr }; // 安全地解引用原子指针
-            if !custom_script_status.loading{
-                self.execute_user_command(command.clone(), custom_script_status.clone());
-            }
-            self.text = custom_script_status.result.clone();
         }else{
             if self.type_name != "text" {
                 if let Some(text) = match self.type_name.as_str() {
