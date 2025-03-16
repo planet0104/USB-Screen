@@ -11,7 +11,7 @@ export component CustomScriptDialog inherits Dialog {
       Text { text: "Powershell获取CPU使用率:"; }
       TextInput { read-only: true; color: blueviolet; text: "powershell -command \"(Get-WmiObject Win32_Processor | Select-Object -ExpandProperty LoadPercentage).ToString() + '%'\""; }
       Text { text: "Linux Shell获取当前CPU使用率:"; }
-      TextInput { read-only: true; color: blueviolet; text: "top -bn1 | grep \"Cpu(s)\" | awk '{printf \"%.0f%%\\n\", 100 - $8}'"; }
+      TextInput { read-only: true; color: blueviolet; text: "top -bn2 -d 1 | grep '%Cpu' | tail -1 | awk '{printf \"%.1f%%\\n\", $2 + $4}'"; }
     }
     StandardButton { kind: ok; }
 }
