@@ -1,4 +1,6 @@
 use std::{io, path::PathBuf, process::{Command, Stdio}};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 use image::{imageops::FilterType, RgbaImage};
 
@@ -10,6 +12,7 @@ pub fn execute_user_command(command: &str) -> io::Result<String> {
                 .args(&["-Command", command.trim()])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
+                .creation_flags(0x08000000)
                 .output()?
         } else {
             // 否则使用 `cmd.exe`
@@ -17,6 +20,7 @@ pub fn execute_user_command(command: &str) -> io::Result<String> {
                 .args(&["/C", command.trim()])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
+                .creation_flags(0x08000000)
                 .output()?
         }
     } else {
