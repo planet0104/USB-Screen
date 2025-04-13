@@ -4,8 +4,9 @@ use std::os::windows::process::CommandExt;
 
 use image::{imageops::FilterType, RgbaImage};
 
+#[cfg(target_os = "windows")]
 pub fn execute_user_command(command: &str) -> io::Result<String> {
-    let output = if cfg!(target_os = "windows") {
+    let output =
         // 如果是 PowerShell 命令（以 `powershell` 开头），使用 `powershell.exe`
         if command.trim().to_lowercase().starts_with("powershell") {
             Command::new("powershell")
@@ -22,16 +23,27 @@ pub fn execute_user_command(command: &str) -> io::Result<String> {
                 .stderr(Stdio::piped())
                 .creation_flags(0x08000000)
                 .output()?
-        }
+        };
+        
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(stdout)
     } else {
-        // Linux/macOS 使用 `sh`
-        Command::new("sh")
-            .arg("-c")
-            .arg(command.trim())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()?
-    };
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(io::Error::new(io::ErrorKind::Other, stderr))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn execute_user_command(command: &str) -> io::Result<String> {
+    let output =
+    // Linux/macOS 使用 `sh`
+    Command::new("sh")
+        .arg("-c")
+        .arg(command.trim())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();

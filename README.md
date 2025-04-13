@@ -134,7 +134,7 @@ sh run.sh
 ## 飞牛私有云 fnOS 编译
 
 ```bash
-# 切换到root模式
+# 切换到root模式(登录 planet,root123)
 sudo -i
 # 首先安装rust
 # ...
