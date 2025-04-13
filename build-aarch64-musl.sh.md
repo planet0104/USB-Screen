@@ -10,7 +10,7 @@
 bash
 rm Cargo.lock
 cargo install cross --git https://github.com/cross-rs/cross
-cross build --target aarch64-unknown-linux-musl --release
+cross build --target aarch64-unknown-linux-musl --release #如果编译失败，使用 crates.io 编译！不要用rxproxy
 
 # openwrp配置花生壳教程
 https://service.oray.com/question/20547.html
