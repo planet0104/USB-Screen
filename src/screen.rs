@@ -6,6 +6,7 @@ use crate::{
     widgets::{ImageWidget, SaveableWidget, TextWidget, Widget},
 };
 use anyhow::{anyhow, Result};
+use async_std::fs;
 use log::info;
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use offscreen_canvas::{Font, FontSettings, OffscreenCanvas, BLACK};
@@ -236,8 +237,8 @@ impl ScreenRender {
         self.canvas.height()
     }
 
-    pub fn decompress_screen_file(file: PathBuf) -> Result<Vec<u8>>{
-        let compressed = std::fs::read(file)?;
+    pub async fn decompress_screen_file(file: PathBuf) -> Result<Vec<u8>>{
+        let compressed = fs::read(file).await?;
         Ok(decompress_size_prepended(&compressed)?)
     }
 

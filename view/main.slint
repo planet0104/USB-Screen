@@ -115,6 +115,7 @@ export component CanvasEditor inherits Window{
     //单独添加的字段，用于存放进度条宽高，或者其他宽高
     in-out property <string> active_widget_prop_width;
     in-out property <string> active_widget_prop_height;
+    in-out property <string> active_widget_prop_alignment: "居中";
     //自定义内容脚本
     in-out property <string> active_widget_custom_script;
     in-out property <image> active_widget_image;
@@ -144,13 +145,12 @@ export component CanvasEditor inherits Window{
     callback update-widget-text();
     callback update-widget-text-color();
     callback update-widget-tags();
-    callback update-widget-prop-size();
+    callback update_widget_prop_size();
+    callback update_widget_alignment();
     callback update-widget-custom-script();
     callback show-custom-script-dialog();
     callback update-widget-image();
     callback update-widget-image-color();
-    callback new-image-ready();
-    callback screen-uncompress-ready();
     callback select_widget(string);
     callback delete_widget(string);
     callback clone_widget(string);
@@ -166,7 +166,7 @@ export component CanvasEditor inherits Window{
     in-out property <brush> picker-color;
     in-out property <float> picker-brightness;
     //回调函数，拾取了像素坐标，在代码中获取坐标处颜色
-    callback color-picker-choose-color(length, length) -> brush;
+    callback color-picker-choose-color(brush, length, length) -> brush;
     //回调函数，设置颜色亮度
     callback color-picker-brightness-change();
 
@@ -194,7 +194,7 @@ export component CanvasEditor inherits Window{
                 color-picker-brightness-change();
             }
             choose-color(x, y) => {
-                picker-color = color-picker-choose-color(x, y);
+                picker-color = color-picker-choose-color(picker-color, x, y);
                 picker.slider-color = @linear-gradient(180deg, picker-color 0%, black 100%);
             }
         }
@@ -565,6 +565,29 @@ export component CanvasEditor inherits Window{
                                     }
                                 }
                             }
+                            //文本设置宽度和高度、对齐方式
+                            if active_widget_type_name != "images" && active_widget_type_name != "webcam" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "宽度:"; width: 40px; }
+                                LineEdit { width: 50px; height: 20px; text <=> active_widget_prop_width; input-type: text; edited => { update_widget_prop_size() } }
+                                Text { text: "高度:"; width: 40px; }
+                                LineEdit { width: 50px; height: 20px; text <=> active_widget_prop_height; input-type: text; edited => { update_widget_prop_size() } }
+                            }
+                            if active_widget_type_name != "images" && active_widget_type_name != "webcam" : HorizontalBox {
+                                padding-top: 5px;
+                                padding-bottom: 0px;
+                                Text { text: "对齐方式:"; width: 60px; }
+                                ComboBox {
+                                    height: self.preferred-height*1.5;
+                                    model: ["居中", "居左", "居右"];
+                                    current-value <=> active_widget_prop_alignment;
+                                    selected => {
+                                        active_widget_prop_alignment = self.current-value;
+                                        update_widget_alignment()
+                                    }
+                                }
+                            }
                             //带有百分比的控件，tag1="1"代表进度条，tag1="2"代表垂直进度条, 其他代表普通文本
                             if active_widget_type_name == "memory_percent"
                                 || active_widget_type_name == "swap_percent"
@@ -574,29 +597,19 @@ export component CanvasEditor inherits Window{
                                 || active_widget_type_name == "cpu_temp."
                                 || active_widget_type_name == "gpu_temp."
                                 || active_widget_type_name == "gpu_memory_load"
-                               : VerticalLayout{
-                                    HorizontalBox {
-                                        padding-top: 5px;
-                                        padding-bottom: 0px;
-                                        Text { text: "显示:"; width: 40px; }
-                                        ComboBox {
-                                            width: self.preferred-width*1.4;
-                                            height: self.preferred-height*1.5;
-                                            model: ["文字", "进度条", "垂直条"];
-                                            current-value: "文字";
-                                            selected => {
-                                                active_widget_tag1 = self.current-index;
-                                                update-widget-tags()
-                                            }
+                            :   HorizontalBox {
+                                    padding-top: 5px;
+                                    padding-bottom: 0px;
+                                    Text { text: "显示:"; width: 40px; }
+                                    ComboBox {
+                                        width: self.preferred-width*1.4;
+                                        height: self.preferred-height*1.5;
+                                        model: ["文字", "进度条", "垂直条"];
+                                        current-value: "文字";
+                                        selected => {
+                                            active_widget_tag1 = self.current-index;
+                                            update-widget-tags()
                                         }
-                                    }
-                                    HorizontalBox {
-                                        padding-top: 5px;
-                                        padding-bottom: 0px;
-                                        Text { text: "宽度:"; width: 40px; }
-                                        LineEdit { width: 50px; height: 20px; text <=> active_widget_prop_width; input-type: text; edited => { update-widget-prop-size() } }
-                                        Text { text: "高度:"; width: 40px; }
-                                        LineEdit { width: 50px; height: 20px; text <=> active_widget_prop_height; input-type: text; edited => { update-widget-prop-size() } }
                                     }
                             }
 

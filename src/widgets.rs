@@ -8,7 +8,7 @@ use image::{
     buffer::ConvertBuffer, imageops::{resize, FilterType}, Rgba, RgbaImage
 };
 use log::error;
-use offscreen_canvas::{OffscreenCanvas, ResizeOption, RotateOption, WHITE};
+use offscreen_canvas::{measure_text, OffscreenCanvas, ResizeOption, RotateOption, WHITE};
 use serde::{Deserialize, Serialize};
 use std::{any::Any, sync::{atomic::{AtomicPtr, Ordering}, Arc, Mutex}};
 use uuid::Uuid;
@@ -172,6 +172,8 @@ pub struct TextWidget {
     pub tag2: String,
     pub width: Option<i32>,
     pub height: Option<i32>,
+    // 对齐方式 居中, 居左, 居右
+    pub alignment: Option<String>,
     //自定义内容脚本(执行脚本后，获取到数据)
     pub custom_script: Option<String>,
     //这是执行命令完成后获得的数据
@@ -203,6 +205,7 @@ impl TextWidget {
             num_widget: 1,
             tag1: "".to_string(),
             tag2: "".to_string(),
+            alignment: None,
             width: None,
             height: None,
             custom_script: None,
@@ -443,20 +446,46 @@ impl Widget for TextWidget {
             let text_rect = context.measure_text(&text, self.font_size);
             let width = self.width.unwrap_or(text_rect.width());
             let height = self.height.unwrap_or(text_rect.height());
-            if self.width.is_some(){
-                //居左方式调整文本位置
+            let alignment = self.alignment.clone().unwrap_or("".to_string());
+            if self.width.is_some() && alignment.len() > 0{
                 self.position.set_width_and_height(width, height);
+                let text_rect = measure_text(&text, self.font_size, context.font());
+                if alignment == "居中"{
+                    context.draw_text(
+                        &text,
+                        Rgba(self.color),
+                        self.font_size,
+                        self.position.center().0 - text_rect.width()/2,
+                        self.position.top,
+                    );
+                }else if alignment == "居左"{
+                    context.draw_text(
+                        &text,
+                        Rgba(self.color),
+                        self.font_size,
+                        self.position.left,
+                        self.position.top,
+                    );
+                }else if alignment == "居右"{
+                    context.draw_text(
+                        &text,
+                        Rgba(self.color),
+                        self.font_size,
+                        self.position.right - text_rect.width(),
+                        self.position.top,
+                    );
+                }
             }else{
                 //居中方式调整文本位置
                 self.position.set_size(width, height);
+                context.draw_text(
+                    &text,
+                    Rgba(self.color),
+                    self.font_size,
+                    self.position.left,
+                    self.position.top,
+                );
             }
-            context.draw_text(
-                &text,
-                Rgba(self.color),
-                self.font_size,
-                self.position.left,
-                self.position.top,
-            );
         }
     }
 

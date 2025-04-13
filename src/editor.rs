@@ -1,29 +1,29 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use async_std::io::ReadExt;
+use async_std::sync::Mutex;
+use async_std::task::spawn_blocking;
+use async_std::fs::File;
 use hex_color::HexColor;
 use image::buffer::ConvertBuffer;
 use image::RgbaImage;
 use image::{imageops::resize, RgbImage};
 use log::{error, info};
 use offscreen_canvas::{OffscreenCanvas, BLUE, WHITE};
-use rfd::{FileDialog, MessageDialog};
+use rfd::AsyncFileDialog;
 use slint::private_unstable_api::re_exports::KeyEvent;
 use slint::{
-    Brush, Color, Image, Model, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel, Weak,
+    spawn_local, Brush, Color, Image, Model, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel, Weak
 };
+use futures_lite::AsyncWriteExt;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
-use once_cell::sync::Lazy;
 use std::{
     cell::RefCell,
-    fs::File,
-    io::{Read, Write},
     rc::Rc,
     str::FromStr,
-    sync::{Arc, Mutex},
 };
-
-use crate::wifi_screen::StatusInfo;
-use crate::{monitor, utils, wifi_screen};
+use async_std::sync::Arc;
+use crate::{utils, wifi_screen};
 use crate::usb_screen::{self, UsbScreen, UsbScreenInfo};
 use crate::{
     nmc::CITIES,
@@ -38,14 +38,25 @@ enum CurrentScreen{
 }
 struct CurrentUsbScreen{
     info: UsbScreenInfo,
-    screen: UsbScreen
+    screen: Option<UsbScreen>
 }
 
 impl CurrentScreen{
-    fn draw_rgb_image(&mut self, img: &RgbImage) -> Result<()>{
+    async fn draw_rgb_image(&mut self, img: &RgbImage) -> Result<()>{
+        let img = img.clone();
         match self{
             Self::USBScreen(usb) => {
-                usb.screen.draw_rgb_image(0,0, img)
+                let mut screen = usb.screen.take();
+                let (screen, ret) = spawn_blocking(move ||{
+                    let ret = if let Some(s) = screen.as_mut(){
+                        s.draw_rgb_image(0,0, &img)
+                    }else{
+                        Err(anyhow!("绘制出错！"))
+                    };
+                    (screen, ret)
+                }).await;
+                usb.screen = screen;
+                ret
             }
             Self::WiFiScreen(_) => {
                 let img: RgbaImage = img.convert();
@@ -54,18 +65,6 @@ impl CurrentScreen{
         }
     }
 }
-
-// 当前打开的屏幕
-static SCREEN: Lazy<Mutex<Option<CurrentScreen>>> = Lazy::new(|| {
-    Mutex::new(None)
-});
-// 所有屏幕列表
-static ALL_SCREENS: Lazy<Mutex<Vec<UsbScreenInfo>>> = Lazy::new(|| Mutex::new(vec![]) );
-
-//解压好的屏幕数据
-static UNCOMPRESSED_SCREEN: Lazy<Mutex<Option<Vec<u8>>>> = Lazy::new(|| {
-    Mutex::new(None)
-});
 
 slint::include_modules!();
 
@@ -82,11 +81,26 @@ struct CanvasEditorContext {
     picker_img: RgbImage,
     fps: f32,
     last_frame_time: Option<Instant>,
-    devices: Vec<UsbScreenInfo>
+    devices: Vec<UsbScreenInfo>,
+    // 当前打开的屏幕
+    current_screen: Arc<Mutex<Option<CurrentScreen>>>,
+    // 所有屏幕列表
+    all_screens: Arc<Mutex<Vec<UsbScreenInfo>>>
 }
 
 impl CanvasEditorContext {
     fn new(app: Weak<CanvasEditor>) -> Self {
+        
+        let current_screen = Arc::new(Mutex::new(None));//CurrentUSBScreen
+        let all_screens = Arc::new(Mutex::new(vec![]));
+        // static ALL_SCREENS: Lazy<Mutex<Vec<UsbScreenInfo>>> = Lazy::new(|| Mutex::new(vec![]) );
+
+        //解压好的屏幕数据 //Vec<u8>
+        // let uncompressed_screen = Arc::new(Mutex::new(None));
+        // static UNCOMPRESSED_SCREEN: Lazy<Mutex<Option<Vec<u8>>>> = Lazy::new(|| {
+        //     Mutex::new(None)
+        // });
+
         let list_model = Rc::new(VecModel::from(vec![]));
         let win = app.unwrap();
         win.set_object_list(list_model.clone().into());
@@ -175,6 +189,9 @@ impl CanvasEditorContext {
             fps: 10.,
             last_frame_time: None,
             devices: vec![],
+            current_screen,
+            all_screens,
+            // uncompressed_screen
         }
     }
 
@@ -186,11 +203,8 @@ impl CanvasEditorContext {
         }
     }
 
-    pub fn update_device_list(&mut self){
-        self.devices = match ALL_SCREENS.try_lock(){
-            Err(_err) => return,
-            Ok(list) => list.clone()
-        };
+    pub async fn update_device_list(&mut self){
+        self.devices = self.all_screens.lock().await.clone();
         let device_list = Rc::new(VecModel::from(
             self.devices
                 .iter()
@@ -224,31 +238,38 @@ impl CanvasEditorContext {
         //连接当前设备
         if dev_index >= 0{
             let dev = self.devices[dev_index as usize].clone();
-            let app_clone = app.as_weak();
-            std::thread::spawn(move ||{
-                if let Ok(mut screen) = SCREEN.lock(){
-                    //如果已经连接了wifi屏幕，不再刷新
-                    if let Some(CurrentScreen::WiFiScreen(_)) = screen.as_ref(){
-                        info!("wifi屏幕已打开,不再自动连接设备");
-                        return;
-                    }
-                    if let Some(CurrentScreen::USBScreen(s)) = screen.as_ref() {
+            // let app_clone = app.as_weak();
+            //如果已经连接了wifi屏幕，不再刷新
+            {
+                let current_screen = self.current_screen.lock().await;
+                if let Some(&CurrentScreen::WiFiScreen(_)) = current_screen.as_ref(){
+                    info!("wifi屏幕已打开,不再自动连接设备");
+                    return;
+                }
+                if let Some(usb_screen) = current_screen.as_ref() {
+                    if let &CurrentScreen::USBScreen(s) = &usb_screen{
                         if s.info.label == dev.label{
                             info!("已经打开屏幕:{}", dev.label);
                             return;
                         }
                     }
-    
-                    match UsbScreen::open(dev.clone()){
-                        Ok(s) => {
-                            screen.replace(CurrentScreen::USBScreen(CurrentUsbScreen { info: dev.clone(), screen: s }));
-                        }
-                        Err(err) => {
-                            error!("屏幕打开失败:{:?}", err);
-                        }
-                    }
                 }
-            });
+            }
+
+            let mut current_screen_lock = self.current_screen.lock().await;
+            let dev1 = dev.clone();
+            let ret = spawn_blocking(move ||{
+                UsbScreen::open(dev1.clone())
+            }).await;
+            
+            match ret{
+                Ok(s) => {
+                    current_screen_lock.replace(CurrentScreen::USBScreen(CurrentUsbScreen { info: dev.clone(), screen: Some(s) }));
+                }
+                Err(err) => {
+                    error!("屏幕打开失败:{:?}", err);
+                }
+            }
         }
     }
 
@@ -318,13 +339,19 @@ impl CanvasEditorContext {
             }
         }
 
-        let _ = slint::spawn_local(Self::draw_image_to_usb_screen(self.app.clone(), self.screen.canvas.image_data().clone(), self.screen.rotate_degree));
+        let _ = slint::spawn_local(Self::draw_image_to_usb_screen(self.app.clone(), self.current_screen.clone(), self.screen.canvas.image_data().clone(), self.screen.rotate_degree));
         //更新最后时间
         self.last_frame_time = Some(Instant::now());
     }
 
-    async fn draw_image_to_usb_screen(app_clone: Weak<CanvasEditor>, img: RgbaImage, rotate_degree: i32){
-        async_std::task::spawn_blocking(move ||{
+    async fn draw_image_to_usb_screen(app_clone: Weak<CanvasEditor>, current_screen:Arc<Mutex<Option<CurrentScreen>>>, img: RgbaImage, rotate_degree: i32){
+        let mut current_screen = current_screen.lock().await;
+        let current_screen = match current_screen.as_mut(){
+            None => return,
+            Some(s) => s
+        };
+
+        let frame = async_std::task::spawn_blocking(move ||{
             //发送到USB屏幕
             let frame: RgbImage = img.convert();
             let frame = if rotate_degree == 90 {
@@ -336,20 +363,19 @@ impl CanvasEditorContext {
             }else{
                 frame
             };
-            if let Ok(mut screen) = SCREEN.lock(){
-                let mut image_too_complete = false;
-                if let Some(device) = screen.as_mut(){
-                    if let Err(err) = device.draw_rgb_image(&frame){
-                        let err_msg = format!("{err:?}");
-                        image_too_complete =  err_msg.contains("图像太大了");
-                        error!("绘制失败:{err:?}");
-                    }
-                }
-                let _ = app_clone.upgrade_in_event_loop(move |app|{
-                    app.set_image_too_complex(image_too_complete);
-                });
-            }
-        }).await
+            frame
+        }).await;
+
+        let mut image_too_complete = false;
+        if let Err(err) = current_screen.draw_rgb_image(&frame).await{
+            let err_msg = format!("{err:?}");
+            image_too_complete =  err_msg.contains("图像太大了");
+            error!("绘制失败:{err:?}");
+        }
+
+        let _ = app_clone.upgrade_in_event_loop(move |app|{
+            app.set_image_too_complex(image_too_complete);
+        });
     }
 
     fn on_mouse_click(&mut self, mouse_x: f32, mouse_y: f32, image_width: f32, image_height: f32) {
@@ -566,40 +592,43 @@ impl CanvasEditorContext {
         }
     }
 
-    fn on_update_widget_image(&mut self) {
-        let temp_image_clone = self.temp_image.clone();
+    async fn on_update_widget_image(&mut self) {
         let (screen_width, screen_height) = (self.screen.width, self.screen.height);
-        let app_clone = self.app.clone();
-        std::thread::spawn(move || {
-            let file = match FileDialog::new()
-                .add_filter("图像", &["png", "bmp", "jpg", "jpeg", "gif"])
-                .pick_file()
-            {
+        // let app_clone = self.app.clone();
+
+        let file = match AsyncFileDialog::new()
+            .add_filter("图像", &["png", "bmp", "jpg", "jpeg", "gif"])
+            .pick_file().await{
                 None => return,
                 Some(path) => path,
             };
-            let mut file_data = vec![];
-            let result = File::open(file).map(|mut f| f.read_to_end(&mut file_data));
-            if let (Ok(Ok(img)), Ok(mut tmp)) = (
-                result.map(|_| ImageData::load(&file_data, (screen_width, screen_height))),
-                temp_image_clone.lock(),
-            ) {
-                info!(
-                    "选择了图片，最终大小:{}x{} 帧数:{} 帧大小:{}",
-                    img.width,
-                    img.height,
-                    img.frames.len(),
-                    img.frames[0].len()
-                );
-                tmp.replace(img);
-                let _ = app_clone.upgrade_in_event_loop(move |app| {
-                    app.invoke_new_image_ready();
-                });
+        let file_path = file.path();
+        let mut file_data = vec![];
+        let mut f = match File::open(file_path).await{
+            Ok(f) => f,
+            Err(_err) => {
+                return;
             }
-        });
+        };
+        match f.read_to_end(&mut file_data).await{
+            Ok(_) => (),
+            Err(_err) => return
+        };
+        if let Ok(img) = 
+            ImageData::load(&file_data, (screen_width, screen_height)) {
+            info!(
+                "选择了图片，最终大小:{}x{} 帧数:{} 帧大小:{}",
+                img.width,
+                img.height,
+                img.frames.len(),
+                img.frames[0].len()
+            );
+            self.temp_image.lock().await.replace(img);
+            self.on_new_image_ready().await;
+        }
     }
 
-    /// 更新空间的 宽和高属性
+    /// 更新控件的 宽和高属性
     fn on_update_widget_prop_size(&mut self){
         let app = self.app.unwrap();
         let prop_width = app.get_active_widget_prop_width();
@@ -609,15 +638,38 @@ impl CanvasEditorContext {
             .active_widget()
             .and_then(|w| w.as_any_mut().downcast_mut::<TextWidget>())
         {
+            widget.width = None;
+            widget.height = None;
             if let Ok(width) = prop_width.parse::<i32>(){
-                widget.width = Some(width);
+                if width > 0{
+                    widget.width = Some(width);
+                }
             }
             if let Ok(height) = prop_height.parse::<i32>(){
-                widget.height = Some(height);
+                if height > 0{
+                    widget.height = Some(height);
+                }
             }
             let w = widget.width.unwrap_or(widget.font_size as i32 * 5);
             let h = widget.height.unwrap_or(widget.font_size as i32);
             widget.position_mut().set_size(w, h);
+        }
+    }
+
+    /// 更新控件的对齐方式
+    fn on_update_widget_prop_alignment(&mut self){
+        let app = self.app.unwrap();
+        let alignment = app.get_active_widget_prop_alignment();
+
+        if let Some(widget) = self
+            .active_widget()
+            .and_then(|w| w.as_any_mut().downcast_mut::<TextWidget>())
+        {
+            if widget.width.is_none(){
+                toast(app.as_weak().clone(), "请先设置宽度!");
+                return;
+            }
+            widget.alignment = Some(alignment.to_string());
         }
     }
 
@@ -682,12 +734,10 @@ impl CanvasEditorContext {
         }
     }
 
-    fn on_new_image_ready(&mut self) {
-        let image = self.temp_image.lock();
-        if image.is_err() {
-            return;
-        }
-        let image = image.unwrap().take();
+    async fn on_new_image_ready(&mut self) {
+        let image = {
+            self.temp_image.lock().await.take()
+        };
         if image.is_none() {
             return;
         }
@@ -845,6 +895,7 @@ impl CanvasEditorContext {
         app.set_active_widget_custom_script(SharedString::from(widget.custom_script.as_ref().unwrap_or(&String::new())));
         app.set_active_widget_prop_width(SharedString::from(&widget.width.map(|i| format!("{i}")).unwrap_or(String::new())));
         app.set_active_widget_prop_height(SharedString::from(&widget.height.map(|i| format!("{i}")).unwrap_or(String::new())));
+        app.set_active_widget_prop_alignment(SharedString::from(&widget.alignment.clone().unwrap_or(String::new())));
         app.set_active_widget_font_size(format!("{}", widget.font_size as i32).into());
         app.set_active_widget_prefix(SharedString::from(&widget.prefix));
         app.set_active_widget_color(Color::from_argb_u8(
@@ -1296,30 +1347,31 @@ impl CanvasEditorContext {
         let _ = self.screen.setup_monitor();
     }
 
-    fn on_save_screen(&mut self) {
+    async fn on_save_screen(&mut self) {
         //检查是否有打开的屏幕，并且跟当前屏幕大小一致，保存至配置文件中
         let mut size_fit = false;
-        if let Ok(current_device) = SCREEN.lock(){
-            match current_device.as_ref(){
-                None => {
-                    self.screen.device_ip = None;
-                }
-                Some(screen) => {
-                    match screen{
-                        CurrentScreen::WiFiScreen(ip) => {
-                            self.screen.device_ip = Some(ip.to_string());
-                        },
-                        CurrentScreen::USBScreen(screen) => {
-                            self.screen.device_ip = None;
-                            if screen.info.width == self.screen.width as u16 && screen.info.height == self.screen.height as u16{
-                                self.screen.device_address = Some(screen.info.address.clone());
-                                size_fit = true;
-                            }
+        let current_device = self.current_screen.lock().await;
+
+        match current_device.as_ref(){
+            None => {
+                self.screen.device_ip = None;
+            }
+            Some(screen) => {
+                match screen{
+                    CurrentScreen::WiFiScreen(ip) => {
+                        self.screen.device_ip = Some(ip.to_string());
+                    },
+                    CurrentScreen::USBScreen(screen) => {
+                        self.screen.device_ip = None;
+                        if screen.info.width == self.screen.width as u16 && screen.info.height == self.screen.height as u16{
+                            self.screen.device_address = Some(screen.info.address.clone());
+                            size_fit = true;
                         }
                     }
                 }
             }
         }
+
         self.screen.fps = self.fps;
         //错误的屏幕大小要清空
         if !size_fit{
@@ -1332,27 +1384,29 @@ impl CanvasEditorContext {
         match self.screen.to_savable() {
             Ok(saveable) => {
                 let file_name = format!("{}x{}.screen", self.screen.width, self.screen.height);
-                std::thread::spawn(move || {
-                    let file_data = match ScreenRender::saveable_to_compressed_json(&saveable){
-                        Err(err) => {
-                            error!("{:?}", err);
-                            toast(app_clone, &format!("{:?}", err));
-                            return;
-                        }
-                        Ok(v) => v
-                    };
-                    hide_loading(app_clone.clone());
-                    let dlg = rfd::FileDialog::new()
-                        .add_filter("screen", &["screen"])
-                        .set_file_name(file_name);
-                    if let Some(file) = dlg.save_file() {
-                        if let Ok(mut f) = std::fs::File::create(file) {
-                            if let Ok(()) = f.write_all(&file_data){
-                                toast(app_clone, "保存成功");
-                            }
+
+                let save_result = spawn_blocking(move ||{
+                    ScreenRender::saveable_to_compressed_json(&saveable)
+                }).await;
+                let file_data = match save_result{
+                    Err(err) => {
+                        error!("{:?}", err);
+                        toast(app_clone, &format!("{:?}", err));
+                        return;
+                    }
+                    Ok(v) => v
+                };
+                hide_loading(app_clone.clone());
+                let dlg = rfd::AsyncFileDialog::new()
+                    .add_filter("screen", &["screen"])
+                    .set_file_name(file_name);
+                if let Some(file) = dlg.save_file().await {
+                    if let Ok(mut f) = File::create(file.path()).await {
+                        if let Ok(()) = f.write_all(&file_data).await{
+                            toast(app_clone, "保存成功");
                         }
                     }
-                });
+                }
             }
             Err(err) => {
                 error!("{:?}", err);
@@ -1362,17 +1416,7 @@ impl CanvasEditorContext {
     }
 
     /// 从线程中解压数据后，通过 app传递事件来调用此方法加载屏幕
-    fn load_screen_from_uncompressed(&mut self){
-        let file = match UNCOMPRESSED_SCREEN.lock(){
-            Ok(mut v) => {
-                let v = v.take();
-                if v.is_none(){
-                    return;
-                }
-                v.unwrap()
-            }
-            Err(_) => return
-        };
+    async fn load_screen_from_uncompressed(&mut self, file: Vec<u8>){
         match self.screen.load_from_file(file) {
             Ok(()) => {
                 //更新帧率
@@ -1447,28 +1491,21 @@ impl CanvasEditorContext {
         }
     }
 
-    fn on_open_screen(&mut self) {
-        let dlg = rfd::FileDialog::new().add_filter("screen", &["screen"]);
+    async fn on_open_screen(&mut self) {
+        let dlg = rfd::AsyncFileDialog::new().add_filter("screen", &["screen"]);
         toast_loading(self.app.clone(), "加载中...");
         let app_clone = self.app.clone();
-        if let Some(file) = dlg.pick_file() {
-            std::thread::spawn(move ||{
-                match ScreenRender::decompress_screen_file(file){
-                    Ok(uncompressed_screen) => {
-                        hide_loading(app_clone.clone());
-                        if let Ok(mut us) = UNCOMPRESSED_SCREEN.lock(){
-                            us.replace(uncompressed_screen);
-                            let _ = app_clone.upgrade_in_event_loop(move |app| {
-                                app.invoke_screen_uncompress_ready();
-                            });
-                        }
-                    }
-                    Err(err) => {
-                        error!("{:?}", err);
-                        toast(app_clone, &format!("{:?}", err));
-                    }
+        if let Some(file) = dlg.pick_file().await {
+            match ScreenRender::decompress_screen_file(file.path().to_path_buf()).await{
+                Ok(file) => {
+                    self.load_screen_from_uncompressed(file).await;
+                    hide_loading(app_clone.clone());
                 }
-            });
+                Err(err) => {
+                    error!("{:?}", err);
+                    toast(app_clone, &format!("{:?}", err));
+                }
+            }
         }else{
             hide_loading(app_clone);
         }
@@ -1592,21 +1629,21 @@ impl CanvasEditorContext {
         (x, y)
     }
 
-    fn on_save_capture(&mut self) {
+    async fn on_save_capture(&mut self) {
         let image = self.screen.canvas.image_data().clone();
         let file_name = format!("{}x{}.png", self.screen.width, self.screen.height);
-        std::thread::spawn(move || {
-            let dlg = rfd::FileDialog::new()
-                .add_filter("screen", &["screen"])
-                .set_file_name(file_name);
-            if let Some(file) = dlg.save_file() {
-                let _ = image.save(file);
-            }
-        });
+        let dlg = rfd::AsyncFileDialog::new()
+            .add_filter("screen", &["screen"])
+            .set_file_name(file_name);
+        if let Some(file) = dlg.save_file().await {
+            let _ = spawn_blocking(move ||{
+                image.save(file.path())
+            }).await;
+        }
     }
     
     // 编辑了屏幕IP地址，尝试连接Wifi屏幕
-    fn on_update_device_ip(&mut self, device_ip:SharedString){
+    async fn on_update_device_ip(&mut self, device_ip:SharedString){
         let app = self.app.unwrap();
         let device_ip = device_ip.to_string();
         self.screen.device_ip.replace(device_ip.clone());
@@ -1624,93 +1661,86 @@ impl CanvasEditorContext {
         app.set_is_testing_device_ip(true);
         let app_c = app.as_weak();
         //尝试连接屏幕
-        std::thread::spawn(move ||{
-            let success = match wifi_screen::test_screen_sync(device_ip.clone()){
-                Ok(()) => {
-                    //测试连接成功
-                    if let Ok(mut screen) = SCREEN.lock(){
-                        //关闭USB屏幕
-                        if let Some(CurrentScreen::USBScreen(_)) = screen.as_ref() {
-                            let _ = screen.take();
-                        }
+        let device_ip_clone = device_ip.clone();
+        let test_ret = spawn_blocking(move ||{
+            wifi_screen::test_screen_sync(device_ip_clone)
+        }).await;
+        let success = match test_ret{
+            Ok(()) => {
+                //测试连接成功
+                let mut screen = self.current_screen.lock().await;
+                //关闭USB屏幕
+                if let Some(CurrentScreen::USBScreen(_)) = screen.as_ref() {
+                    let _ = screen.take();
+                }
 
-                        //开始连接屏幕
-                        let _ = wifi_screen::send_message(wifi_screen::Message::Connect(device_ip.clone()));
-                        screen.replace(CurrentScreen::WiFiScreen(device_ip.clone()));
-                        let app_c_clone = app_c.clone();
-                        std::thread::spawn(move ||{
-                            for _ in 0..10{
-                                std::thread::sleep(Duration::from_secs(1));
-                                if let Ok(status) = wifi_screen::get_status(){
-                                    if let wifi_screen::Status::Connected = status.status{
-                                        toast(app_c_clone, "连接成功!");
-                                        break;
-                                    }
-                                }
-                            }
-                        });
-                        true
-                    }else{
-                        toast(app_c.clone(), "出错了, 请重新启动程序!");
-                        false
+                //开始连接屏幕
+                let _ = wifi_screen::send_message(wifi_screen::Message::Connect(device_ip.clone()));
+                screen.replace(CurrentScreen::WiFiScreen(device_ip.clone()));
+                let app_c_clone = app_c.clone();
+                for _ in 0..10{
+                    spawn_blocking(move ||{ std::thread::sleep(Duration::from_secs(1)) }).await;
+                    if let Ok(status) = wifi_screen::get_status(){
+                        if let wifi_screen::Status::Connected = status.status{
+                            toast(app_c_clone, "连接成功!");
+                            break;
+                        }
                     }
                 }
-                Err(err) =>{
-                    let msg = format!("WiFi屏幕连接失败:{}", err.root_cause());
-                    toast(app_c.clone(), &msg.as_str());
-                    false
-                }
-            };
-            let _ = app_c.upgrade_in_event_loop(move |app|{
-                app.set_is_testing_device_ip(false);
-                if success{
-                    app.set_device_ip(device_ip.into());
-                }
-            });
+                true
+            }
+            Err(err) =>{
+                let msg = format!("WiFi屏幕连接失败:{}", err.root_cause());
+                toast(app_c.clone(), &msg.as_str());
+                false
+            }
+        };
+        let _ = app_c.upgrade_in_event_loop(move |app|{
+            app.set_is_testing_device_ip(false);
+            if success{
+                app.set_device_ip(device_ip.into());
+            }
         });
     }
 
-    fn on_change_device(&mut self, device: SharedString) {
+    async fn on_change_device(&mut self, device: SharedString) {
         info!("on_change_device: {}", device.as_str());
         //清空IP
         self.app.unwrap().set_device_ip("".into());
         self.screen.device_ip = None;
         let devices = self.devices.clone();
         let app_clone = self.app.clone();
-        std::thread::spawn(move ||{
-            for dev in devices{
-                if device.as_str().contains(&dev.label){
-                    if let Ok(mut screen) = SCREEN.lock(){
+        let mut screen = self.current_screen.lock().await;
 
-                        //================== 关闭wifi屏幕 ================
-                        if let Some(CurrentScreen::WiFiScreen(_)) = screen.as_ref(){
-                            if let Err(err) = wifi_screen::send_message(wifi_screen::Message::Disconnect){
-                                error!("断开连接出错:{err:?}");
-                            }
-                            let _ = screen.take();
-                        }
-                        //===============================================
-                        
-                        if let Some(CurrentScreen::USBScreen(s)) = screen.as_ref() {
-                            if s.info.label == dev.label{
-                                info!("已经打开屏幕:{}", dev.label);
-                                return;
-                            }
-                        }
-                        
-                        match UsbScreen::open(dev.clone()){
-                            Ok(s) => {
-                                screen.replace(CurrentScreen::USBScreen(CurrentUsbScreen { info: dev.clone(), screen: s }));
-                            }
-                            Err(err) => {
-                                toast(app_clone, &format!("屏幕打开失败:{:?}", err));
-                            }
-                        }
+        for dev in devices{
+            if device.as_str().contains(&dev.label){
+                //================== 关闭wifi屏幕 ================
+                if let Some(CurrentScreen::WiFiScreen(_)) = screen.as_ref(){
+                    if let Err(err) = wifi_screen::send_message(wifi_screen::Message::Disconnect){
+                        error!("断开连接出错:{err:?}");
                     }
-                    break;
+                    let _ = screen.take();
                 }
+                //===============================================
+                
+                if let Some(CurrentScreen::USBScreen(s)) = screen.as_ref() {
+                    if s.info.label == dev.label{
+                        info!("已经打开屏幕:{}", dev.label);
+                        return;
+                    }
+                }
+                
+                match UsbScreen::open(dev.clone()){
+                    Ok(s) => {
+                        screen.replace(CurrentScreen::USBScreen(CurrentUsbScreen { info: dev.clone(), screen: Some(s) }));
+                    }
+                    Err(err) => {
+                        toast(app_clone, &format!("屏幕打开失败:{:?}", err));
+                    }
+                }
+                break;
             }
-        });
+        }
     }
 
     fn on_change_fps(&mut self, fps: SharedString) {
@@ -1754,7 +1784,9 @@ pub fn run() -> Result<()> {
         TimerMode::Repeated,
         std::time::Duration::from_millis(40),
         move || {
-            context_clone.borrow_mut().render_screen();
+            if let Ok(mut context) = context_clone.try_borrow_mut(){
+                context.render_screen();
+            }
         },
     );
 
@@ -1765,12 +1797,16 @@ pub fn run() -> Result<()> {
         TimerMode::Repeated,
         std::time::Duration::from_secs(4),
         move || {
-            context_clone.borrow_mut().update_device_list();
-            std::thread::spawn(move ||{
-                info!("开始刷新串口列表...");
-                let devices = usb_screen::find_all_device();
-                if let  Ok(mut d) = ALL_SCREENS.lock(){
-                    *d = devices;
+            let context_clone1 = context_clone.clone();
+            let _ = spawn_local(async move {
+                let context = context_clone1.try_borrow_mut();
+                if let Ok(mut context) = context{
+                    context.update_device_list().await;
+                    info!("开始刷新串口列表...");
+                    let devices = spawn_blocking(move ||{
+                        usb_screen::find_all_device()
+                    }).await;
+                    *context.all_screens.lock().await = devices;   
                 }
             });
         }
@@ -1783,7 +1819,9 @@ pub fn run() -> Result<()> {
         TimerMode::Repeated,
         std::time::Duration::from_secs(1),
         move || {
-            context_clone.borrow_mut().refresh_model_text();
+            if let Ok(mut context) = context_clone.try_borrow_mut(){
+                context.refresh_model_text();
+            }
         },
     );
 
@@ -1810,9 +1848,9 @@ pub fn run() -> Result<()> {
     }
     let context_clone = context.clone();
     app.on_mouse_click(move |mouse_x, mouse_y, image_width, image_height| {
-        context_clone
-            .borrow_mut()
-            .on_mouse_click(mouse_x, mouse_y, image_width, image_height);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_mouse_click(mouse_x, mouse_y, image_width, image_height);
+        }
     });
 
     app.on_show_custom_script_dialog(move ||{
@@ -1829,161 +1867,228 @@ pub fn run() -> Result<()> {
     let context_clone = context.clone();
     app.on_mouse_move(
         move |mouse_x, mouse_y, image_width, image_height, pressed: bool| {
-            context_clone.borrow_mut().on_mouse_move(
-                mouse_x,
-                mouse_y,
-                image_width,
-                image_height,
-                pressed,
-            );
+            if let Ok(mut context) = context_clone.try_borrow_mut(){
+                context.on_mouse_move(
+                    mouse_x,
+                    mouse_y,
+                    image_width,
+                    image_height,
+                    pressed,
+                );
+            }
         },
     );
 
     let context_clone = context.clone();
     app.on_update_widget_position(move || {
-        context_clone.borrow_mut().on_update_widget_position();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_update_widget_position();
+        }
     });
 
     let context_clone = context.clone();
     app.on_update_widget_custom_script(move ||{
-        context_clone.borrow_mut().on_update_widget_custom_script();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_update_widget_custom_script();
+        }
     });
 
     let context_clone = context.clone();
     app.on_update_widget_text(move || {
-        context_clone.borrow_mut().on_update_widget_text();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_update_widget_text();
+        }
     });
 
     let context_clone = context.clone();
     app.on_update_widget_image(move || {
-        context_clone.borrow_mut().on_update_widget_image();
+        let context_clone1 = context_clone.clone();
+        let _ = spawn_local(async move {
+            if let Ok(mut context) = context_clone1.try_borrow_mut(){
+                context.on_update_widget_image().await;
+            }
+        });
     });
 
     let context_clone = context.clone();
     app.on_update_widget_image_color(move || {
-        context_clone.borrow_mut().on_update_widget_image_color();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_update_widget_image_color();
+        }
     });
 
     let context_clone = context.clone();
     app.on_update_widget_text_color(move || {
-        context_clone.borrow_mut().on_update_widget_text_color();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_update_widget_text_color();
+        }
     });
 
     let context_clone = context.clone();
     app.on_update_widget_tags(move || {
-        context_clone.borrow_mut().on_update_widget_tags();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_update_widget_tags();
+        }
     });
 
     let context_clone = context.clone();
     app.on_update_widget_prop_size(move || {
-        context_clone.borrow_mut().on_update_widget_prop_size();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_update_widget_prop_size();
+        }
     });
 
     let context_clone = context.clone();
-    app.on_new_image_ready(move || {
-        context_clone.borrow_mut().on_new_image_ready();
-    });
-
-    let context_clone = context.clone();
-    app.on_screen_uncompress_ready(move || {
-        context_clone.borrow_mut().load_screen_from_uncompressed();
+    app.on_update_widget_alignment(move || {
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_update_widget_prop_alignment();
+        }
     });
 
     let context_clone = context.clone();
     app.on_select_widget(move |uuid| {
-        context_clone.borrow_mut().on_select_widget(uuid);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_select_widget(uuid);
+        }
     });
 
     let context_clone = context.clone();
     app.on_move_down_widget(move |uuid| {
-        //下移，即组件的索引往前移动
-        context_clone.borrow_mut().move_up_widget(uuid);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            //下移，即组件的索引往前移动
+            context.move_up_widget(uuid);
+        }
     });
 
     let context_clone = context.clone();
     app.on_move_up_widget(move |uuid| {
-        //上移，即组件的索引往后移动
-        context_clone.borrow_mut().move_back_widget(uuid);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            //上移，即组件的索引往后移动
+            context.move_back_widget(uuid);
+        }
     });
 
     let context_clone = context.clone();
     app.on_delete_widget(move |uuid| {
-        context_clone.borrow_mut().delete_widget(uuid.as_str());
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.delete_widget(uuid.as_str());
+        }
     });
 
     let context_clone = context.clone();
     app.on_clone_widget(move |uuid| {
-        context_clone.borrow_mut().clone_widget(uuid.as_str());
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.clone_widget(uuid.as_str());
+        }
     });
 
     let context_clone = context.clone();
     app.on_screen_mouse_scroll(move |dx, dy| {
-        context_clone.borrow_mut().on_screen_mouse_scroll(dx, dy);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_screen_mouse_scroll(dx, dy);
+        }
     });
 
     let context_clone = context.clone();
     app.on_screen_key_event(move |event| {
-        context_clone.borrow_mut().on_screen_key_event(event);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_screen_key_event(event);
+        }
     });
 
     let context_clone = context.clone();
     app.on_change_screen(move |index| {
-        context_clone.borrow_mut().on_change_screen(index);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_change_screen(index);   
+        }
     });
 
     let context_clone = context.clone();
     app.on_change_rotation(move |index| {
-        context_clone.borrow_mut().on_change_rotation(index);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_change_rotation(index);   
+        }
     });
 
     let context_clone = context.clone();
     app.on_save_screen(move || {
-        context_clone.borrow_mut().on_save_screen();
+        let context_clone1 = context_clone.clone();
+        let _ = spawn_local(async move {
+            if let Ok(mut context) = context_clone1.try_borrow_mut(){
+                context.on_save_screen().await;
+            }
+        });
     });
 
     let context_clone = context.clone();
     app.on_save_capture(move ||{
-        context_clone.borrow_mut().on_save_capture();
+        let context_clone1 = context_clone.clone();
+        let _ = spawn_local(async move {
+            if let Ok(mut context) = context_clone1.try_borrow_mut(){
+                context.on_save_capture().await;
+            }
+        });
     });
 
     let context_clone = context.clone();
     app.on_open_screen(move || {
-        context_clone.borrow_mut().on_open_screen();
+        let context_clone1 = context_clone.clone();
+        let _ = spawn_local(async move {
+            if let Ok(mut context) = context_clone1.try_borrow_mut(){
+                context.on_open_screen().await;
+            }
+        });
     });
 
     let context_clone = context.clone();
     app.on_open_font(move || {
-        context_clone.borrow_mut().on_open_font();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_open_font();
+        }
     });
 
     //选择颜色
     let context_clone = context.clone();
-    app.on_color_picker_choose_color(move |x, y| {
-        context_clone
-            .borrow_mut()
-            .on_color_picker_choose_color(x, y)
+    app.on_color_picker_choose_color(move |old_brush, x, y| {
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_color_picker_choose_color(x, y)
+        }else{
+            old_brush
+        }
     });
 
     let context_clone = context.clone();
     app.on_color_picker_brightness_change(move || {
-        context_clone
-            .borrow_mut()
-            .on_color_picker_brightness_change();
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_color_picker_brightness_change();
+        }
     });
 
     let context_clone = context.clone();
     app.on_change_device(move |device| {
-        context_clone.borrow_mut().on_change_device(device);
+        let context_clone1 = context_clone.clone();
+        let _ = spawn_local(async move {
+            if let Ok(mut context) = context_clone1.try_borrow_mut(){
+                context.on_change_device(device).await;
+            }
+        });
     });
 
     let context_clone = context.clone();
     app.on_update_device_ip(move |ip| {
-        context_clone.borrow_mut().on_update_device_ip(ip);
+        let context_clone1 = context_clone.clone();
+        let _ = spawn_local(async move {
+            if let Ok(mut context) = context_clone1.try_borrow_mut(){
+                context.on_update_device_ip(ip).await;
+            }
+        });
     });
 
     let context_clone = context.clone();
     app.on_change_fps(move |fps| {
-        context_clone.borrow_mut().on_change_fps(fps);
+        if let Ok(mut context) = context_clone.try_borrow_mut(){
+            context.on_change_fps(fps);   
+        }
     });
 
 
