@@ -1,7 +1,9 @@
 /target
 /.history
-#git rm -r --cached OpenHardwareMonitorService/obj
-/OpenHardwareMonitorService/obj
 /dist
 /dist.zip
 /esp32-wifi-screen
+/LibreHardwareMonitor.NET.10
+/LibreHardwareMonitorNativeAot/publish
+/LibreHardwareMonitorNativeAot/bin
+/LibreHardwareMonitorNativeAot/obj

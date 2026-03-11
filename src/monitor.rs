@@ -12,7 +12,7 @@ use rust_ephemeris::lunnar::SolorDate;
 use serde::{Deserialize, Serialize};
 
 use std::{
-    collections::HashMap, process::Child, sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard}, time::{Duration, Instant, SystemTime}
+    collections::HashMap, sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard}, time::{Duration, Instant, SystemTime}
 };
 use sysinfo::Networks;
 
@@ -21,10 +21,6 @@ use crate::nmc::{query_weather, City, RealWeather};
 const UPDATE_WEATHER_DELAY: u128 = 1000 * 60 * 5;
 const UPDATE_NET_IP_DELAY: u128 = 1000 * 60 * 5;
 pub const EMPTY_STRING: &str = "N/A";
-
-#[cfg(windows)]
-const OHMS_EXE_FILE: &[u8] =
-    include_bytes!("../OpenHardwareMonitorService/bin/Release/OpenHardwareMonitorService.exe");
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemUptime {
@@ -131,7 +127,6 @@ pub struct SystemInfo {
     watch_disk_speed_task: Option<std::thread::JoinHandle<()>>,
     watch_network_speed_task: Option<std::thread::JoinHandle<()>>,
     watch_webcam_task: Option<std::thread::JoinHandle<()>>,
-    hardware_monitor_service: Option<Child>,
     //缓存最新的相机图像
     webcam_frame: Option<RgbImage>,
     //监控的相机编号以及帧率
@@ -195,7 +190,6 @@ impl SystemInfo {
             network_speed_per_sec: (EMPTY_STRING.to_string(), EMPTY_STRING.to_string()),
             memory_percent: EMPTY_STRING.to_string(),
             swap_percent: EMPTY_STRING.to_string(),
-            hardware_monitor_service: None,
             local_ip: EMPTY_STRING.to_string(),
             net_ip: None,
             webcam_frame: None,
@@ -333,6 +327,8 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
                 let mut watch_cpu_clock_speed = false;
                 let mut watch_disk_speed = false;
                 let mut watch_network_speed = false;
+                #[cfg(windows)]
+                let mut watch_hardware_monitor = false;
 
                 #[cfg(target_os = "linux")]
                 let mut watch_cpu_temperature = false;
@@ -345,6 +341,16 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
                     watch_process = ctx.watch_process;
                     watch_disk_speed = ctx.watch_disk_speed;
                     watch_network_speed = ctx.watch_network_speed;
+                    #[cfg(windows)]
+                    {
+                        watch_hardware_monitor = ctx.watch_cpu_fan
+                            || ctx.watch_cpu_temperatures
+                            || ctx.watch_cpu_power
+                            || ctx.watch_gpu_clock_speed
+                            || ctx.watch_gpu_fan
+                            || ctx.watch_gpu_load
+                            || ctx.watch_gpu_temperatures;
+                    }
                     drop(ctx);
                 }
 
@@ -421,7 +427,7 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
 
                 #[cfg(any(feature = "nokhwa-webcam", feature = "v4l-webcam"))]
                 if watch_webcam {
-                    try_write(|mut ctx| {
+                    try_write(|ctx| {
                         if ctx.watch_webcam_task.is_none() {
                             #[cfg(any(feature = "nokhwa-webcam", all(not(windows),feature = "v4l-webcam")))]
                             {
@@ -471,6 +477,19 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
                                 ctx.cpu_freq_query_task = Some(start_get_cpu_freq_thread());
                             }
                         });
+                    }
+                }
+
+                #[cfg(windows)]
+                if watch_hardware_monitor {
+                    match crate::windows_hardware_monitor::get_hardware_data() {
+                        Ok(Some(info)) => {
+                            try_write(|mut ctx| {
+                                apply_hardware_data(&mut ctx, &info);
+                            });
+                        }
+                        Ok(None) => {}
+                        Err(err) => error!("刷新硬件监控数据失败:{err:?}"),
                     }
                 }
             }
@@ -720,7 +739,12 @@ pub fn cpu_temperature() -> Option<String> {
 
 pub fn cpu_cores_power() -> Option<String> {
     let ctx = try_read_ctx()?;
-    Some(format!("{:.1}W", ctx.cpu_cores_power))
+    let power = if ctx.cpu_cores_power > 0.0 {
+        ctx.cpu_cores_power
+    } else {
+        ctx.cpu_package_power
+    };
+    Some(format!("{:.1}W", power))
 }
 
 pub fn cpu_package_power() -> Option<String> {
@@ -802,7 +826,12 @@ pub fn gpu_temperature(index: usize) -> Option<String> {
 
 pub fn gpu_cores_power() -> Option<String> {
     let ctx = try_read_ctx()?;
-    Some(format!("{:.1}W", ctx.gpu_cores_power))
+    let power = if ctx.gpu_cores_power > 0.0 {
+        ctx.gpu_cores_power
+    } else {
+        ctx.gpu_package_power
+    };
+    Some(format!("{:.1}W", power))
 }
 
 pub fn gpu_package_power() -> Option<String> {
@@ -1433,87 +1462,50 @@ pub fn start_disk_counter_thread() -> std::thread::JoinHandle<()> {
 }
 
 #[cfg(windows)]
-pub static HTTP_PORT: Lazy<u16> = Lazy::new(|| {
-    use tiny_http::{Response, Server};
-    let server = Server::http("0.0.0.0:0").unwrap();
-    let port = server.server_addr().to_ip().unwrap().port();
-    std::thread::spawn(move || {
-        for mut request in server.incoming_requests() {
-            info!(
-                "received request! method: {:?}, url: {:?}, headers: {:?}",
-                request.method(),
-                request.url(),
-                request.headers()
-            );
+fn apply_hardware_data(ctx: &mut SystemInfo, info: &HardwareData) {
+    if let Some(cpu_info) = info.cpu_infos.first() {
+        ctx.cpu_temperatures = cpu_info.temperatures.clone();
+        ctx.cpu_fans = cpu_info.fans.clone();
+        ctx.cpu_temperature_total = cpu_info.total_temperature;
+        ctx.cpu_cores_power = cpu_info.cores_power;
+        ctx.cpu_package_power = cpu_info.package_power;
+    } else {
+        ctx.cpu_temperatures.clear();
+        ctx.cpu_fans.clear();
+        ctx.cpu_temperature_total = 0.;
+        ctx.cpu_cores_power = 0.;
+        ctx.cpu_package_power = 0.;
+    }
 
-            let url = request.url();
+    ctx.gpu_clocks.clear();
+    ctx.gpu_fans.clear();
+    ctx.gpu_load.clear();
+    ctx.gpu_temperatures.clear();
+    ctx.gpu_temperature_total.clear();
+    ctx.gpu_load_total.clear();
+    ctx.gpu_memory_load.clear();
+    ctx.gpu_memory_total.clear();
+    ctx.gpu_cores_power = 0.;
+    ctx.gpu_package_power = 0.;
 
-            if url.contains("isOpen") {
-                let is_open = if let Ok(ctx) = SYSTEM_INFO.read() {
-                    ctx.watch_cpu_fan
-                        || ctx.watch_cpu_temperatures
-                        || ctx.watch_cpu_power
-                        || ctx.watch_gpu_clock_speed
-                        || ctx.watch_gpu_fan
-                        || ctx.watch_gpu_load
-                        || ctx.watch_gpu_temperatures
-                } else {
-                    false
-                };
-                let _ = request.respond(Response::from_string(if is_open {
-                    "true"
-                } else {
-                    "false"
-                }));
-            } else if url.contains("upload") {
-                let reader = request.as_reader();
-                let mut buf = vec![];
-                let _ = reader.read_to_end(&mut buf);
-                if buf.len() > 0 {
-                    if let Ok(json) = String::from_utf8(buf.to_vec()) {
-                        info!("接收到:{json}");
-                        if let Ok(info) = serde_json::from_str::<HardwareData>(&json) {
-                            if let Ok(mut ctx) = SYSTEM_INFO.write() {
-                                if info.cpu_infos.len() > 0 {
-                                    ctx.cpu_temperatures = info.cpu_infos[0].temperatures.clone();
-                                    ctx.cpu_fans = info.cpu_infos[0].fans.clone();
-                                    ctx.cpu_temperature_total = info.cpu_infos[0].total_temperature;
-                                    ctx.cpu_cores_power = info.cpu_infos[0].cores_power;
-                                    ctx.cpu_package_power = info.cpu_infos[0].package_power;
-                                }
-                                ctx.gpu_clocks.clear();
-                                ctx.gpu_fans.clear();
-                                ctx.gpu_load.clear();
-                                ctx.gpu_temperatures.clear();
-                                ctx.gpu_temperature_total.clear();
-                                ctx.gpu_load_total.clear();
-                                ctx.gpu_memory_load.clear();
-                                ctx.gpu_memory_total.clear();
-                                for gpu_info in info.gpu_infos {
-                                    ctx.gpu_clocks.push(gpu_info.clocks.clone());
-                                    ctx.gpu_temperatures.push(gpu_info.temperatures.clone());
-                                    ctx.gpu_fans.push(gpu_info.fans.clone());
-                                    ctx.gpu_load.push(gpu_info.loads.clone());
-                                    ctx.gpu_temperature_total.push(gpu_info.total_temperature);
-                                    ctx.gpu_load_total.push(gpu_info.total_load);
-                                    ctx.gpu_cores_power = gpu_info.cores_power;
-                                    ctx.gpu_package_power = gpu_info.package_power;
-                                    ctx.gpu_memory_load.push(gpu_info.memory_load);
-                                    ctx.gpu_memory_total.push(gpu_info.memory_total);
-                                }
-                            }
-                        }
-                    }
-                }
-                let _ = request.respond(Response::from_string("OK"));
-            }
-        }
-    });
-    port
-});
+    for gpu_info in &info.gpu_infos {
+        ctx.gpu_clocks.push(gpu_info.clocks.clone());
+        ctx.gpu_temperatures.push(gpu_info.temperatures.clone());
+        ctx.gpu_fans.push(gpu_info.fans.clone());
+        ctx.gpu_load.push(gpu_info.loads.clone());
+        ctx.gpu_temperature_total.push(gpu_info.total_temperature);
+        ctx.gpu_load_total.push(gpu_info.total_load);
+        ctx.gpu_cores_power = gpu_info.cores_power;
+        ctx.gpu_package_power = gpu_info.package_power;
+        ctx.gpu_memory_load.push(gpu_info.memory_load);
+        ctx.gpu_memory_total.push(gpu_info.memory_total);
+    }
+}
 
 #[cfg(windows)]
-fn start_hardware_monitor_service(ctx: &mut SystemInfo) -> Result<()> {
+fn start_hardware_monitor_service(_ctx: &mut SystemInfo) -> Result<()> {
+    use rfd::{MessageDialog, MessageDialogResult};
+
     //以管理员身份启动
     match crate::is_run_as_admin() {
         Ok(true) => (),
@@ -1540,62 +1532,13 @@ fn start_hardware_monitor_service(ctx: &mut SystemInfo) -> Result<()> {
         }
     };
 
-    use std::process::Command;
-
-    use rfd::{MessageDialog, MessageDialogResult};
-
-    //如果进程已经启动，不再创建
-    if let Some(child) = ctx.hardware_monitor_service.as_mut() {
-        if let Ok(None) = child.try_wait() {
-            return Ok(());
-        }
-    }
-
-    ctx.hardware_monitor_service = None;
-
-    //判断exe是否存在
-    let exe_path = "./OpenHardwareMonitorService.exe";
-
-    if let Err(_) = std::fs::metadata(exe_path) {
-        //exe文件不存在，重写创建
-        std::fs::write(exe_path, OHMS_EXE_FILE)?;
-        info!("exe文件创建成功.");
-    }
-    info!("启动exe...");
-
-    let child = Command::new(exe_path)
-        .arg(format!("{}", *HTTP_PORT))
-        .spawn()?;
-    let pid = child.id();
-    info!("{}进程启动:{}", exe_path, pid);
-
-    ctx.hardware_monitor_service = Some(child);
-
-    Ok(())
+    crate::windows_hardware_monitor::ensure_hardware_monitor_started()
 }
 
 pub fn clean() {
     #[cfg(windows)]
     {
-        let exe_path = "OpenHardwareMonitorService.exe";
-        //结束进程
-        if let Ok(mut ctx) = SYSTEM_INFO.write().map_err(|err| anyhow!("{:?}", err)) {
-            if let Some(mut process) = ctx.hardware_monitor_service.take() {
-                let ret = process.kill();
-                info!("进程已结束:{:?}", ret);
-                let ret = process.wait();
-                info!("wait:{:?}", ret);
-            }
-        }
-
-        match std::fs::metadata(exe_path) {
-            // 如果成功，文件存在
-            Ok(_) => {
-                let ret = std::fs::remove_file(exe_path);
-                info!("删除exe:{:?}", ret);
-            }
-            _ => (),
-        }
+        crate::windows_hardware_monitor::clean_hardware_monitor();
     }
 }
 

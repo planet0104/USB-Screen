@@ -2290,10 +2290,6 @@ pub fn run() -> Result<()> {
         }
     });
 
-
-    #[cfg(windows)]
-    info!("http服务端口号:{}", *crate::monitor::HTTP_PORT);
-
     app.run()?;
     Ok(())
 }
