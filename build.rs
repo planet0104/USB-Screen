@@ -24,87 +24,85 @@ fn main() {
 fn generate_hardware_wrapper_bytes() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not found"));
     let output = out_dir.join("lhm_wrapper_bytes.rs");
+    let openhardware_enabled = env::var_os("CARGO_FEATURE_OPENHARDWARE").is_some();
 
     println!("cargo:rerun-if-env-changed=CARGO_CFG_WINDOWS");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_OPENHARDWARE");
 
     if env::var_os("CARGO_CFG_WINDOWS").is_none() {
-        fs::write(
-            output,
-            "pub const EMBEDDED_LHM_WRAPPER: &[u8] = &[];\npub const EMBEDDED_OHM_SERVICE_EXE: &[u8] = &[];\npub const EMBEDDED_OHM_SERVICE_CONFIG: &[u8] = &[];\npub const EMBEDDED_OHM_OPENHARDWAREMONITOR_LIB: &[u8] = &[];\npub const EMBEDDED_OHM_NEWTONSOFT_JSON: &[u8] = &[];\n",
-        )
+        fs::write(output, build_empty_embedded_constants())
             .expect("failed to write non-windows wrapper source");
         return;
     }
 
-    let wrappers = [EmbeddedBinary {
-            constant_name: "EMBEDDED_LHM_WRAPPER",
-            error_message: "缺少 LibreHardwareMonitor NativeAOT 包装器 DLL 请先执行 dotnet publish LibreHardwareMonitorNativeAot/LhmNativeAotWrapper.csproj -r win-x64 -c Release -o LibreHardwareMonitorNativeAot/publish",
-            tracked_paths: &[
-                "LibreHardwareMonitorNativeAot/LhmNativeAotWrapper.csproj",
-                "LibreHardwareMonitorNativeAot/HardwareWrapper.cs",
-                "LibreHardwareMonitorNativeAot/hardware_wrapper.h",
-                "LibreHardwareMonitor.NET.10/LibreHardwareMonitorLib.dll",
-            ],
-            candidates: &[
-                "LibreHardwareMonitorNativeAot/publish/LhmNativeAotWrapper.dll",
-                "LibreHardwareMonitorNativeAot/bin/Release/net10.0/win-x64/publish/LhmNativeAotWrapper.dll",
-            ],
-        },
-        EmbeddedBinary {
-            constant_name: "EMBEDDED_OHM_SERVICE_EXE",
-            error_message: "缺少 OpenHardwareMonitor 补充服务 EXE 文件 请先构建 OpenHardwareMonitorService 或补齐 OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe",
-            tracked_paths: &[
-                "OpenHardwareMonitorService/OpenHardwareMonitorService.csproj",
-                "OpenHardwareMonitorService/Program.cs",
-                "OpenHardwareMonitorService/App.config",
-                "OpenHardwareMonitorService/app.manifest",
-                "OpenHardwareMonitorService/libs/OpenHardwareMonitorLib.dll",
-                "OpenHardwareMonitorService/libs/Newtonsoft.Json.dll",
-                "OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe",
-            ],
-            candidates: &[
-                "OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe",
-                "OpenHardwareMonitorService/bin/Release/OpenHardwareMonitorService.exe",
-            ],
-        },
-        EmbeddedBinary {
-            constant_name: "EMBEDDED_OHM_SERVICE_CONFIG",
-            error_message: "缺少 OpenHardwareMonitor 补充服务配置文件 请先构建 OpenHardwareMonitorService 或补齐 OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe.config",
-            tracked_paths: &[
-                "OpenHardwareMonitorService/OpenHardwareMonitorService.csproj",
-                "OpenHardwareMonitorService/App.config",
-                "OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe.config",
-            ],
-            candidates: &[
-                "OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe.config",
-                "OpenHardwareMonitorService/bin/Release/OpenHardwareMonitorService.exe.config",
-            ],
-        },
-        EmbeddedBinary {
-            constant_name: "EMBEDDED_OHM_OPENHARDWAREMONITOR_LIB",
-            error_message: "缺少 OpenHardwareMonitorLib.dll 请补齐 OpenHardwareMonitorService/libs/OpenHardwareMonitorLib.dll",
-            tracked_paths: &[
-                "OpenHardwareMonitorService/libs/OpenHardwareMonitorLib.dll",
-            ],
-            candidates: &[
-                "OpenHardwareMonitorService/libs/OpenHardwareMonitorLib.dll",
-            ],
-        },
-        EmbeddedBinary {
-            constant_name: "EMBEDDED_OHM_NEWTONSOFT_JSON",
-            error_message: "缺少 Newtonsoft.Json.dll 请补齐 OpenHardwareMonitorService/libs/Newtonsoft.Json.dll",
-            tracked_paths: &[
-                "OpenHardwareMonitorService/libs/Newtonsoft.Json.dll",
-            ],
-            candidates: &[
-                "OpenHardwareMonitorService/libs/Newtonsoft.Json.dll",
-            ],
-        },
-    ];
+    let lhm_wrapper = EmbeddedBinary {
+        constant_name: "EMBEDDED_LHM_WRAPPER",
+        error_message: "缺少 LibreHardwareMonitor NativeAOT 包装器 DLL 请先执行 dotnet publish LibreHardwareMonitorNativeAot/LhmNativeAotWrapper.csproj -r win-x64 -c Release -o LibreHardwareMonitorNativeAot/publish",
+        tracked_paths: &[
+            "LibreHardwareMonitorNativeAot/LhmNativeAotWrapper.csproj",
+            "LibreHardwareMonitorNativeAot/HardwareWrapper.cs",
+            "LibreHardwareMonitorNativeAot/hardware_wrapper.h",
+            "LibreHardwareMonitor.NET.10/LibreHardwareMonitorLib.dll",
+        ],
+        candidates: &[
+            "LibreHardwareMonitorNativeAot/publish/LhmNativeAotWrapper.dll",
+            "LibreHardwareMonitorNativeAot/bin/Release/net10.0/win-x64/publish/LhmNativeAotWrapper.dll",
+        ],
+    };
 
-    let mut content = String::new();
-    for wrapper in wrappers {
-        content.push_str(&build_embedded_constant(wrapper));
+    let mut content = build_embedded_constant(lhm_wrapper);
+
+    if openhardware_enabled {
+        let wrappers = [
+            EmbeddedBinary {
+                constant_name: "EMBEDDED_OHM_SERVICE_EXE",
+                error_message: "缺少 OpenHardwareMonitor 补充服务 EXE 文件 请先构建 OpenHardwareMonitorService 或补齐 OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe",
+                tracked_paths: &[
+                    "OpenHardwareMonitorService/OpenHardwareMonitorService.csproj",
+                    "OpenHardwareMonitorService/Program.cs",
+                    "OpenHardwareMonitorService/App.config",
+                    "OpenHardwareMonitorService/app.manifest",
+                    "OpenHardwareMonitorService/libs/OpenHardwareMonitorLib.dll",
+                    "OpenHardwareMonitorService/libs/Newtonsoft.Json.dll",
+                    "OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe",
+                ],
+                candidates: &[
+                    "OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe",
+                    "OpenHardwareMonitorService/bin/Release/OpenHardwareMonitorService.exe",
+                ],
+            },
+            EmbeddedBinary {
+                constant_name: "EMBEDDED_OHM_SERVICE_CONFIG",
+                error_message: "缺少 OpenHardwareMonitor 补充服务配置文件 请先构建 OpenHardwareMonitorService 或补齐 OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe.config",
+                tracked_paths: &[
+                    "OpenHardwareMonitorService/OpenHardwareMonitorService.csproj",
+                    "OpenHardwareMonitorService/App.config",
+                    "OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe.config",
+                ],
+                candidates: &[
+                    "OpenHardwareMonitorService/publish/OpenHardwareMonitorService.exe.config",
+                    "OpenHardwareMonitorService/bin/Release/OpenHardwareMonitorService.exe.config",
+                ],
+            },
+            EmbeddedBinary {
+                constant_name: "EMBEDDED_OHM_OPENHARDWAREMONITOR_LIB",
+                error_message: "缺少 OpenHardwareMonitorLib.dll 请补齐 OpenHardwareMonitorService/libs/OpenHardwareMonitorLib.dll",
+                tracked_paths: &["OpenHardwareMonitorService/libs/OpenHardwareMonitorLib.dll"],
+                candidates: &["OpenHardwareMonitorService/libs/OpenHardwareMonitorLib.dll"],
+            },
+            EmbeddedBinary {
+                constant_name: "EMBEDDED_OHM_NEWTONSOFT_JSON",
+                error_message: "缺少 Newtonsoft.Json.dll 请补齐 OpenHardwareMonitorService/libs/Newtonsoft.Json.dll",
+                tracked_paths: &["OpenHardwareMonitorService/libs/Newtonsoft.Json.dll"],
+                candidates: &["OpenHardwareMonitorService/libs/Newtonsoft.Json.dll"],
+            },
+        ];
+
+        for wrapper in wrappers {
+            content.push_str(&build_embedded_constant(wrapper));
+        }
+    } else {
+        content.push_str(&build_empty_ohm_constants());
     }
 
     fs::write(output, content).expect("failed to write embedded wrapper source");
@@ -142,4 +140,21 @@ fn build_embedded_constant(wrapper: EmbeddedBinary<'_>) -> String {
             )
         })
         .unwrap_or_else(|| format!("compile_error!(\"{}\");\n", wrapper.error_message))
+}
+
+fn build_empty_embedded_constants() -> String {
+    let mut content = String::new();
+    content.push_str("pub const EMBEDDED_LHM_WRAPPER: &[u8] = &[];\n");
+    content.push_str(&build_empty_ohm_constants());
+    content
+}
+
+fn build_empty_ohm_constants() -> String {
+    [
+        "pub const EMBEDDED_OHM_SERVICE_EXE: &[u8] = &[];\n",
+        "pub const EMBEDDED_OHM_SERVICE_CONFIG: &[u8] = &[];\n",
+        "pub const EMBEDDED_OHM_OPENHARDWAREMONITOR_LIB: &[u8] = &[];\n",
+        "pub const EMBEDDED_OHM_NEWTONSOFT_JSON: &[u8] = &[];\n",
+    ]
+    .join("")
 }

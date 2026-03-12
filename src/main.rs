@@ -294,8 +294,10 @@ fn create_tray_icon(file: String) -> Result<()> {
     
         let tray_menu = Box::new(tray_icon::menu::Menu::new());
         let quit_i = tray_icon::menu::MenuItem::new("退出", true, None);
+        let hide_tray_i = tray_icon::menu::MenuItem::new("隐藏托盘", true, None);
         let editor_i = tray_icon::menu::MenuItem::new("编辑器", true, None);
         let _ = tray_menu.append(&quit_i);
+        let _ = tray_menu.append(&hide_tray_i);
         let _ = tray_menu.append(&editor_i);
         let mut tray_icon = None;
         let mut menu_channel = None;
@@ -337,10 +339,13 @@ fn create_tray_icon(file: String) -> Result<()> {
                 }
             }
     
+            let mut hide_tray = false;
             if let (Some(_tray_icon), Some(menu_channel)) = (tray_icon.as_mut(), menu_channel.as_mut()){
                 if let Ok(event) = menu_channel.try_recv() {
                     if event.id == quit_i.id() {
                         *control_flow = ControlFlow::Exit;
+                    }else if event.id == hide_tray_i.id() {
+                        hide_tray = true;
                     }else if event.id == editor_i.id() {
                         //启动自身
                         if let Ok(_) = run_as_editor(){
@@ -349,6 +354,11 @@ fn create_tray_icon(file: String) -> Result<()> {
                         }
                     }
                 }
+            }
+
+            if hide_tray {
+                tray_icon = None;
+                menu_channel = None;
             }
         });
     }

@@ -58,9 +58,11 @@ struct SensorInfo {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderKind {
     Libre,
+    #[cfg(feature = "openhardware")]
     Open,
 }
 
+#[cfg(feature = "openhardware")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OhmMode {
     Extended,
@@ -69,6 +71,7 @@ enum OhmMode {
 
 enum HardwareMonitorProvider {
     NativeAot(NativeAotProvider),
+    #[cfg(feature = "openhardware")]
     OhmProcess(OhmProcessProvider),
 }
 
@@ -102,6 +105,7 @@ struct NativeAotProvider {
     close: CloseFn,
 }
 
+#[cfg(feature = "openhardware")]
 struct OhmProcessProvider {
     display_name: &'static str,
     process: Child,
@@ -163,12 +167,14 @@ pub fn get_hardware_data() -> Result<Option<HardwareData>> {
     for provider in guard.iter_mut() {
         let result = match provider {
             HardwareMonitorProvider::NativeAot(api) => api.update_and_read_json::<HardwareData>(),
+            #[cfg(feature = "openhardware")]
             HardwareMonitorProvider::OhmProcess(api) => api.read_hardware_data(),
         };
 
         match result {
             Ok(Some(data)) => match provider.kind() {
                 ProviderKind::Libre => libre_data = Some(data),
+                #[cfg(feature = "openhardware")]
                 ProviderKind::Open => open_data = Some(data),
             },
             Ok(None) => {}
@@ -194,6 +200,7 @@ impl HardwareMonitorProvider {
     fn kind(&self) -> ProviderKind {
         match self {
             Self::NativeAot(api) => api.kind,
+            #[cfg(feature = "openhardware")]
             Self::OhmProcess(_) => ProviderKind::Open,
         }
     }
@@ -201,6 +208,7 @@ impl HardwareMonitorProvider {
     fn display_name(&self) -> &'static str {
         match self {
             Self::NativeAot(api) => api.display_name,
+            #[cfg(feature = "openhardware")]
             Self::OhmProcess(api) => api.display_name,
         }
     }
@@ -208,6 +216,7 @@ impl HardwareMonitorProvider {
     fn shutdown(self) {
         match self {
             Self::NativeAot(api) => api.shutdown(),
+            #[cfg(feature = "openhardware")]
             Self::OhmProcess(api) => api.shutdown(),
         }
     }
@@ -300,6 +309,7 @@ impl NativeAotProvider {
     }
 }
 
+#[cfg(feature = "openhardware")]
 impl OhmProcessProvider {
     fn start() -> Result<Self> {
         let working_dir = extract_ohm_process_files()?;
@@ -438,6 +448,7 @@ fn load_hardware_providers() -> Result<Vec<HardwareMonitorProvider>> {
         }
     }
 
+    #[cfg(feature = "openhardware")]
     match OhmProcessProvider::start() {
         Ok(api) => {
             info!("{} 子进程补充服务已加载", api.display_name);
@@ -448,6 +459,9 @@ fn load_hardware_providers() -> Result<Vec<HardwareMonitorProvider>> {
             errors.push(format!("OpenHardwareMonitor: {err}"));
         }
     }
+
+    #[cfg(not(feature = "openhardware"))]
+    info!("OpenHardwareMonitor feature 未启用 当前仅使用 LibreHardwareMonitor NativeAOT");
 
     if providers.is_empty() {
         if errors.is_empty() {
@@ -479,6 +493,7 @@ fn extract_embedded_dll(file_name: &str, embedded_bytes: &[u8]) -> Result<PathBu
     Ok(path)
 }
 
+#[cfg(feature = "openhardware")]
 fn extract_ohm_process_files() -> Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!("usb-screen-ohm-process-{}", std::process::id()));
     fs::create_dir_all(&dir)?;
@@ -497,6 +512,7 @@ fn extract_ohm_process_files() -> Result<PathBuf> {
     Ok(dir)
 }
 
+#[cfg(feature = "openhardware")]
 fn spawn_ohm_process(
     working_dir: &PathBuf,
     port: u16,
@@ -528,6 +544,7 @@ fn spawn_ohm_process(
     Ok((process, stdout_log_path, stderr_log_path))
 }
 
+#[cfg(feature = "openhardware")]
 fn read_ohm_process_log_tail(
     service_log_path: &PathBuf,
     stdout_log_path: &PathBuf,
@@ -551,6 +568,7 @@ fn read_ohm_process_log_tail(
     }
 }
 
+#[cfg(feature = "openhardware")]
 fn read_log_tail(path: &PathBuf) -> String {
     match fs::read_to_string(path) {
         Ok(content) => content
@@ -566,6 +584,7 @@ fn read_log_tail(path: &PathBuf) -> String {
     }
 }
 
+#[cfg(feature = "openhardware")]
 fn format_log_tail(log_tail: &Option<String>) -> String {
     match log_tail {
         Some(text) if !text.trim().is_empty() => format!(" detail={text}"),
@@ -636,6 +655,7 @@ fn dump_all_sensors(api: &NativeAotProvider) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "openhardware")]
 fn start_ohm_http_server(
     listener: TcpListener,
     latest_json: Arc<Mutex<Option<String>>>,
@@ -669,6 +689,7 @@ fn start_ohm_http_server(
     })
 }
 
+#[cfg(feature = "openhardware")]
 fn handle_ohm_request(mut stream: TcpStream, latest_json: &Arc<Mutex<Option<String>>>) -> Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
@@ -721,6 +742,7 @@ fn handle_ohm_request(mut stream: TcpStream, latest_json: &Arc<Mutex<Option<Stri
     Ok(())
 }
 
+#[cfg(feature = "openhardware")]
 fn write_http_response(stream: &mut TcpStream, status_code: u16, body: &str) -> Result<()> {
     let status_text = match status_code {
         200 => "OK",

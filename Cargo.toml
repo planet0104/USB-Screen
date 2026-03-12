@@ -17,6 +17,7 @@ v4l-webcam = ["v4l"]
 editor = ["slint", "rfd"]
 tray = ["tray-icon", "tao"]
 usb-serial = ["serialport"]
+openhardware = []
 
 [dependencies]
 anyhow = "1"
