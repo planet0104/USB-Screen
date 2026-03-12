@@ -799,7 +799,7 @@ pub fn gpu_load(index: usize) -> Option<String> {
     if load_total.is_none(){
         return pick_index_or_first(&ctx.gpu_load, index).map(|loads|{
             let load = loads.get(0).unwrap_or(&0.);
-            format!("{load}%")
+            format!("{load:.1}%")
         });
     }
 
@@ -810,7 +810,7 @@ pub fn gpu_load(index: usize) -> Option<String> {
             }
         }
     }
-    load_total.map(|load| format!("{load}%"))
+    load_total.map(|load| format!("{load:.1}%"))
 }
 
 pub fn gpu_memory_load(index: usize) -> Option<String> {
@@ -824,7 +824,7 @@ pub fn gpu_memory_load(index: usize) -> Option<String> {
 pub fn gpu_memory_total_mb(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
     return pick_index_or_first(&ctx.gpu_memory_total, index).map(|total|{
-        format!("{total}")
+        format!("{total:.1}")
     });
 }
 
@@ -846,7 +846,7 @@ pub fn gpu_clocks(index: usize) -> Option<String> {
         .clone()
         .into_iter()
         .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
-        .map(|v| format!("{:.2} GHz", v / 1000.))
+        .map(|v| format!("{:.1} GHz", v / 1000.))
 }
 
 pub fn gpu_temperature(index: usize) -> Option<String> {
@@ -894,7 +894,7 @@ pub fn gpu_fan(index: usize) -> Option<String> {
     if fans.len() == 0 {
         return None;
     }
-    Some(format!("{}RPM", fans[0]))
+    Some(format!("{:.1}RPM", fans[0]))
 }
 
 pub fn num_process() -> Option<String> {
