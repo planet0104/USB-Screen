@@ -1,15 +1,7 @@
 @echo off
 
-echo Installing nightly toolchain and target...
-rustup install nightly
-rustup target add x86_64-pc-windows-msvc --toolchain nightly
-if errorlevel 1 exit /b %errorlevel%
+echo Building OpenHardwareMonitorService...
 
-echo Publishing NativeAOT LibreHardwareMonitor wrapper...
-dotnet publish LibreHardwareMonitorNativeAot\LhmNativeAotWrapper.csproj -r win-x64 -c Release -o LibreHardwareMonitorNativeAot\publish
-if errorlevel 1 exit /b %errorlevel%
-
-echo Building OpenHardwareMonitor service source...
 if not exist OpenHardwareMonitorService\publish mkdir OpenHardwareMonitorService\publish
 
 set "MSBUILD_EXE="
@@ -34,16 +26,14 @@ if errorlevel 1 exit /b %errorlevel%
 
 copy /Y OpenHardwareMonitorService\bin\Release\OpenHardwareMonitorService.exe OpenHardwareMonitorService\publish\OpenHardwareMonitorService.exe >nul
 if errorlevel 1 exit /b %errorlevel%
-copy /Y OpenHardwareMonitorService\bin\Release\OpenHardwareMonitorService.exe.config OpenHardwareMonitorService\publish\OpenHardwareMonitorService.exe.config >nul
-if errorlevel 1 exit /b %errorlevel%
 
-echo Building Windows version with editor + tray + nokhwa-webcam + usb-serial...
-rustup run nightly cargo zbuild --target x86_64-pc-windows-msvc --no-default-features --features "editor,tray,nokhwa-webcam,usb-serial"
+copy /Y OpenHardwareMonitorService\bin\Release\OpenHardwareMonitorService.exe.config OpenHardwareMonitorService\publish\OpenHardwareMonitorService.exe.config >nul
 if errorlevel 1 exit /b %errorlevel%
 
 echo.
 echo ============================================
 echo Build completed!
-echo Output: target/x86_64-pc-windows-msvc/release/USB-Screen.exe
+echo EXE: OpenHardwareMonitorService\publish\OpenHardwareMonitorService.exe
+echo CONFIG: OpenHardwareMonitorService\publish\OpenHardwareMonitorService.exe.config
 echo ============================================
 echo.

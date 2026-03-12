@@ -127,7 +127,7 @@ impl ScreenRender {
                         }))?
                     }
                 }
-                "cpu" | "cpu_usage" => monitor::watch_cpu(true)?,
+                "cpu" | "cpu_usage" | "num_cpu" => monitor::watch_cpu(true)?,
                 "cpu_freq" => monitor::watch_cpu_clock_speed(true)?,
                 "cpu_temp." => monitor::watch_cpu_temperatures(true)?,
                 "cpu_cores_power" | "gpu_cores_power" => monitor::watch_cpu_power(true)?,
@@ -173,7 +173,7 @@ impl ScreenRender {
             w.set_index(*map.get_mut(w.type_name()).unwrap());
         }
         for w in self.widgets.iter_mut() {
-            w.set_num_widget(*map.get_mut(w.type_name()).unwrap());
+            w.set_num_widget(*map.get_mut(w.type_name()).unwrap() + 1);
         }
         self.canvas.clear(BLACK);
         for widget in &mut self.widgets {

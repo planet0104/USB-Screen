@@ -263,7 +263,8 @@ public static class HardwareWrapper
             IsControllerEnabled = enableEnhancedSensors,
             IsMemoryEnabled = true,
             IsMotherboardEnabled = enableEnhancedSensors,
-            IsStorageEnabled = true
+            // 当前 Rust 侧只消费 CPU/GPU 数据 关闭存储链路可避免额外的设备监听副作用
+            IsStorageEnabled = false
         };
     }
 

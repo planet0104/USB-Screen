@@ -12,7 +12,7 @@ use crate::offscreen_canvas::{OffscreenCanvas, BLUE, WHITE, Rect as CanvasRect};
 use rfd::AsyncFileDialog;
 use slint::private_unstable_api::re_exports::KeyEvent;
 use slint::{
-    spawn_local, Brush, Color, Image, Model, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel, Weak
+    spawn_local, Brush, CloseRequestResponse, Color, Image, Model, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel, Weak
 };
 use futures_lite::AsyncWriteExt;
 use std::net::IpAddr;
@@ -1955,6 +1955,16 @@ pub fn run() -> Result<()> {
 
     let context = Rc::new(RefCell::new(CanvasEditorContext::new(app.as_weak())));
 
+    let mut hardware_monitor_cleaned = false;
+    app.window().on_close_requested(move || {
+        if !hardware_monitor_cleaned {
+            hardware_monitor_cleaned = true;
+            info!("编辑器关闭前清理硬件监控资源");
+            crate::monitor::clean();
+        }
+        CloseRequestResponse::HideWindow
+    });
+
     //渲染回调函数, 30ms调用一次，实际渲染根据选择的帧率渲染
     let context_clone = context.clone();
     let timer = Timer::default();
@@ -1979,6 +1989,15 @@ pub fn run() -> Result<()> {
             let _ = spawn_local(async move {
                 let context = context_clone1.try_borrow_mut();
                 if let Ok(mut context) = context{
+                    let has_open_screen = {
+                        let current_screen = context.current_screen.lock().await;
+                        current_screen.is_some()
+                    };
+                    if has_open_screen {
+                        context.update_device_list().await;
+                        info!("屏幕已打开 跳过刷新串口列表");
+                        return;
+                    }
                     context.update_device_list().await;
                     info!("开始刷新串口列表...");
                     let devices = spawn_blocking(move ||{

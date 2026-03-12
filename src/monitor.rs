@@ -40,7 +40,8 @@ pub struct NetIpInfo {
 }
 
 #[cfg(windows)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HardwareInfo {
     pub fans: Vec<f32>,
     pub temperatures: Vec<f32>,
@@ -55,7 +56,8 @@ pub struct HardwareInfo {
 }
 
 #[cfg(windows)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HardwareData {
     pub cpu_infos: Vec<HardwareInfo>,
     pub gpu_infos: Vec<HardwareInfo>,
@@ -427,7 +429,7 @@ fn start_refresh_task(ctx: Arc<RwLock<SystemInfo>>) {
 
                 #[cfg(any(feature = "nokhwa-webcam", feature = "v4l-webcam"))]
                 if watch_webcam {
-                    try_write(|ctx| {
+                    try_write(|mut ctx| {
                         if ctx.watch_webcam_task.is_none() {
                             #[cfg(any(feature = "nokhwa-webcam", all(not(windows),feature = "v4l-webcam")))]
                             {
@@ -531,6 +533,18 @@ pub fn watch_cpu(watch_cpu: bool) -> Result<()> {
     let mut sys_info = SYSTEM_INFO.write().map_err(|err| anyhow!("{:?}", err))?;
     sys_info.watch_cpu = watch_cpu;
     Ok(())
+}
+
+#[cfg(windows)]
+fn pick_index_or_first<T>(items: &[T], index: usize) -> Option<&T> {
+    items.get(index).or_else(|| items.first())
+}
+
+#[cfg(windows)]
+fn pick_map_value_or_first<T: Clone>(items: &HashMap<usize, T>, index: usize) -> Option<T> {
+    items.get(&index)
+        .cloned()
+        .or_else(|| items.iter().min_by_key(|(key, _)| *key).map(|(_, value)| value.clone()))
 }
 
 pub fn watch_cpu_clock_speed(watch_cpu_clock_speed: bool) -> Result<()> {
@@ -734,7 +748,17 @@ pub fn cpu_clock_speed(index: Option<usize>) -> Option<String> {
 
 pub fn cpu_temperature() -> Option<String> {
     let ctx = try_read_ctx()?;
-    Some(format!("{:.1}°C", ctx.cpu_temperature_total))
+    let temperature = if ctx.cpu_temperature_total > 0.0 {
+        Some(ctx.cpu_temperature_total)
+    } else {
+        ctx.cpu_temperatures
+            .iter()
+            .copied()
+            .filter(|value| *value > 0.0)
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+    }?;
+
+    Some(format!("{temperature:.1}°C"))
 }
 
 pub fn cpu_cores_power() -> Option<String> {
@@ -749,7 +773,15 @@ pub fn cpu_cores_power() -> Option<String> {
 
 pub fn cpu_package_power() -> Option<String> {
     let ctx = try_read_ctx()?;
-    Some(format!("{:.1}W", ctx.cpu_package_power))
+    let power = if ctx.cpu_package_power > 0.0 {
+        ctx.cpu_package_power
+    } else {
+        ctx.cpu_cores_power
+    };
+    if power <= 0.0 {
+        return None;
+    }
+    Some(format!("{power:.1}W"))
 }
 
 pub fn cpu_fan() -> Option<String> {
@@ -762,10 +794,10 @@ pub fn cpu_fan() -> Option<String> {
 
 pub fn gpu_load(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
-    let mut load_total = ctx.gpu_load_total.get(index).clone();
+    let mut load_total = pick_index_or_first(&ctx.gpu_load_total, index);
 
     if load_total.is_none(){
-        return ctx.gpu_load.get(index).map(|loads|{
+        return pick_index_or_first(&ctx.gpu_load, index).map(|loads|{
             let load = loads.get(0).unwrap_or(&0.);
             format!("{load}%")
         });
@@ -784,21 +816,21 @@ pub fn gpu_load(index: usize) -> Option<String> {
 pub fn gpu_memory_load(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
 
-    return ctx.gpu_memory_load.get(index).map(|load|{
+    return pick_index_or_first(&ctx.gpu_memory_load, index).map(|load|{
         format!("{:.1}%", load)
     });
 }
 
 pub fn gpu_memory_total_mb(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
-    return ctx.gpu_memory_total.get(index).map(|total|{
+    return pick_index_or_first(&ctx.gpu_memory_total, index).map(|total|{
         format!("{total}")
     });
 }
 
 pub fn gpu_memory_total_gb(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
-    return ctx.gpu_memory_total.get(index).map(|total|{
+    return pick_index_or_first(&ctx.gpu_memory_total, index).map(|total|{
         let gb = total / 1024.;
         format!("{:.1}", gb)
     });
@@ -819,9 +851,18 @@ pub fn gpu_clocks(index: usize) -> Option<String> {
 
 pub fn gpu_temperature(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
-    ctx.gpu_temperatures
-        .get(index)
-        .map(|t| format!("{:.1}°C", t.get(0).unwrap_or(&0.)))
+    let list_temperature = pick_index_or_first(&ctx.gpu_temperatures, index)
+        .and_then(|temps| {
+            temps.iter()
+                .copied()
+                .filter(|value| *value > 0.0)
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
+        });
+    let total_temperature = pick_index_or_first(&ctx.gpu_temperature_total, index)
+        .copied()
+        .filter(|value| *value > 0.0);
+    let temperature = total_temperature.or(list_temperature)?;
+    Some(format!("{temperature:.1}°C"))
 }
 
 pub fn gpu_cores_power() -> Option<String> {
@@ -836,21 +877,24 @@ pub fn gpu_cores_power() -> Option<String> {
 
 pub fn gpu_package_power() -> Option<String> {
     let ctx = try_read_ctx()?;
-    Some(format!("{:.1}W", ctx.gpu_package_power))
+    let power = if ctx.gpu_package_power > 0.0 {
+        ctx.gpu_package_power
+    } else {
+        ctx.gpu_cores_power
+    };
+    if power <= 0.0 {
+        return None;
+    }
+    Some(format!("{power:.1}W"))
 }
 
 pub fn gpu_fan(index: usize) -> Option<String> {
     let ctx = try_read_ctx()?;
-    if ctx.gpu_fans.len() == 0 {
+    let fans = pick_index_or_first(&ctx.gpu_fans, index)?;
+    if fans.len() == 0 {
         return None;
     }
-    if ctx.gpu_fans.len() <= index {
-        return None;
-    }
-    if ctx.gpu_fans[index].len() == 0 {
-        return None;
-    }
-    Some(format!("{}RPM", ctx.gpu_fans[index][0]))
+    Some(format!("{}RPM", fans[0]))
 }
 
 pub fn num_process() -> Option<String> {
@@ -858,7 +902,7 @@ pub fn num_process() -> Option<String> {
 }
 
 pub fn disk_usage(index: usize) -> Option<String> {
-    try_read_ctx()?.disk_usage.clone().remove(&index)
+    pick_map_value_or_first(&try_read_ctx()?.disk_usage, index)
 }
 
 pub fn disk_speed_per_sec() -> Option<(String, String)> {
@@ -1463,9 +1507,9 @@ pub fn start_disk_counter_thread() -> std::thread::JoinHandle<()> {
 
 #[cfg(windows)]
 fn apply_hardware_data(ctx: &mut SystemInfo, info: &HardwareData) {
-    if let Some(cpu_info) = info.cpu_infos.first() {
-        ctx.cpu_temperatures = cpu_info.temperatures.clone();
-        ctx.cpu_fans = cpu_info.fans.clone();
+    if let Some(cpu_info) = merge_primary_hardware_info(&info.cpu_infos) {
+        ctx.cpu_temperatures = cpu_info.temperatures;
+        ctx.cpu_fans = cpu_info.fans;
         ctx.cpu_temperature_total = cpu_info.total_temperature;
         ctx.cpu_cores_power = cpu_info.cores_power;
         ctx.cpu_package_power = cpu_info.package_power;
@@ -1489,16 +1533,83 @@ fn apply_hardware_data(ctx: &mut SystemInfo, info: &HardwareData) {
     ctx.gpu_package_power = 0.;
 
     for gpu_info in &info.gpu_infos {
+        if !hardware_info_has_visible_data(gpu_info) {
+            continue;
+        }
         ctx.gpu_clocks.push(gpu_info.clocks.clone());
         ctx.gpu_temperatures.push(gpu_info.temperatures.clone());
         ctx.gpu_fans.push(gpu_info.fans.clone());
         ctx.gpu_load.push(gpu_info.loads.clone());
         ctx.gpu_temperature_total.push(gpu_info.total_temperature);
         ctx.gpu_load_total.push(gpu_info.total_load);
-        ctx.gpu_cores_power = gpu_info.cores_power;
-        ctx.gpu_package_power = gpu_info.package_power;
+        ctx.gpu_cores_power = pick_non_zero(ctx.gpu_cores_power, gpu_info.cores_power);
+        ctx.gpu_package_power = pick_non_zero(ctx.gpu_package_power, gpu_info.package_power);
         ctx.gpu_memory_load.push(gpu_info.memory_load);
         ctx.gpu_memory_total.push(gpu_info.memory_total);
+    }
+}
+
+#[cfg(windows)]
+fn merge_primary_hardware_info(infos: &[HardwareInfo]) -> Option<HardwareInfo> {
+    let mut merged: Option<HardwareInfo> = None;
+
+    for info in infos {
+        if !hardware_info_has_visible_data(info) {
+            continue;
+        }
+
+        match merged.as_mut() {
+            Some(current) => merge_hardware_info_value(current, info),
+            None => merged = Some(info.clone()),
+        }
+    }
+
+    merged
+}
+
+#[cfg(windows)]
+fn merge_hardware_info_value(target: &mut HardwareInfo, source: &HardwareInfo) {
+    if target.fans.is_empty() && !source.fans.is_empty() {
+        target.fans = source.fans.clone();
+    }
+    if target.temperatures.is_empty() && !source.temperatures.is_empty() {
+        target.temperatures = source.temperatures.clone();
+    }
+    if target.loads.is_empty() && !source.loads.is_empty() {
+        target.loads = source.loads.clone();
+    }
+    if target.clocks.is_empty() && !source.clocks.is_empty() {
+        target.clocks = source.clocks.clone();
+    }
+
+    target.package_power = pick_non_zero(target.package_power, source.package_power);
+    target.cores_power = pick_non_zero(target.cores_power, source.cores_power);
+    target.total_load = pick_non_zero(target.total_load, source.total_load);
+    target.total_temperature = pick_non_zero(target.total_temperature, source.total_temperature);
+    target.memory_load = pick_non_zero(target.memory_load, source.memory_load);
+    target.memory_total = pick_non_zero(target.memory_total, source.memory_total);
+}
+
+#[cfg(windows)]
+fn hardware_info_has_visible_data(info: &HardwareInfo) -> bool {
+    !info.fans.is_empty()
+        || !info.temperatures.is_empty()
+        || !info.loads.is_empty()
+        || !info.clocks.is_empty()
+        || info.package_power > 0.
+        || info.cores_power > 0.
+        || info.total_load > 0.
+        || info.total_temperature > 0.
+        || info.memory_load > 0.
+        || info.memory_total > 0.
+}
+
+#[cfg(windows)]
+fn pick_non_zero(current: f32, candidate: f32) -> f32 {
+    if current > 0. {
+        current
+    } else {
+        candidate
     }
 }
 

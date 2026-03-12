@@ -15,6 +15,19 @@ use uuid::Uuid;
 
 static DEFAULT_IMAGE: &[u8] = include_bytes!("../images/icon_photo.png");
 
+fn indexed_text_or_first<F>(index: usize, getter: F) -> Option<String>
+where
+    F: Fn(usize) -> Option<String>,
+{
+    getter(index).or_else(|| {
+        if index == 0 {
+            None
+        } else {
+            getter(0)
+        }
+    })
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Rect {
     pub left: i32,
@@ -296,31 +309,31 @@ impl Widget for TextWidget {
                     }
                     "cpu_fan" => Some(monitor::cpu_fan().unwrap_or(monitor::EMPTY_STRING.to_string())),
                     "gpu_fan" => Some(
-                        monitor::gpu_fan(self.num_widget_index)
+                        indexed_text_or_first(self.num_widget_index, monitor::gpu_fan)
                             .unwrap_or(monitor::EMPTY_STRING.to_string()),
                     ),
                     "gpu_clock" => Some(
-                        monitor::gpu_clocks(self.num_widget_index)
+                        indexed_text_or_first(self.num_widget_index, monitor::gpu_clocks)
                             .unwrap_or(monitor::EMPTY_STRING.to_string()),
                     ),
                     "gpu_load" => Some(
-                        monitor::gpu_load(self.num_widget_index)
+                        indexed_text_or_first(self.num_widget_index, monitor::gpu_load)
                             .unwrap_or(monitor::EMPTY_STRING.to_string()),
                     ),
                     "gpu_memory_load" => Some(
-                        monitor::gpu_memory_load(self.num_widget_index)
+                        indexed_text_or_first(self.num_widget_index, monitor::gpu_memory_load)
                             .unwrap_or(monitor::EMPTY_STRING.to_string()),
                     ),
                     "gpu_memory_total_mb" => Some(
-                        monitor::gpu_memory_total_mb(self.num_widget_index)
+                        indexed_text_or_first(self.num_widget_index, monitor::gpu_memory_total_mb)
                             .unwrap_or(monitor::EMPTY_STRING.to_string()),
                     ),
                     "gpu_memory_total_gb" => Some(
-                        monitor::gpu_memory_total_gb(self.num_widget_index)
+                        indexed_text_or_first(self.num_widget_index, monitor::gpu_memory_total_gb)
                             .unwrap_or(monitor::EMPTY_STRING.to_string()),
                     ),
                     "gpu_temp." => Some(
-                        monitor::gpu_temperature(self.num_widget_index)
+                        indexed_text_or_first(self.num_widget_index, monitor::gpu_temperature)
                             .unwrap_or(monitor::EMPTY_STRING.to_string()),
                     ),
                     "gpu_cores_power" => {
@@ -331,7 +344,7 @@ impl Widget for TextWidget {
                     }
                     "num_cpu" => monitor::num_cpus(),
                     "num_process" => monitor::num_process(),
-                    "disk_usage" => monitor::disk_usage(self.num_widget_index),
+                    "disk_usage" => indexed_text_or_first(self.num_widget_index, monitor::disk_usage),
                     "date" => Some(monitor::date()),
                     "local_ip" => monitor::local_ip_addresses(),
                     "net_ip" => monitor::net_ip_address(),
@@ -871,11 +884,11 @@ impl ProgressWidget {
             }
             "memory_percent" => monitor::memory_percent(),
             "swap_percent" => monitor::swap_percent(),
-            "gpu_load" => monitor::gpu_load(self.num_widget_index),
-            "gpu_memory_load" => monitor::gpu_memory_load(self.num_widget_index),
+            "gpu_load" => indexed_text_or_first(self.num_widget_index, monitor::gpu_load),
+            "gpu_memory_load" => indexed_text_or_first(self.num_widget_index, monitor::gpu_memory_load),
             "cpu_temp." => monitor::cpu_temperature(),
-            "gpu_temp." => monitor::gpu_temperature(self.num_widget_index),
-            "disk_usage" => monitor::disk_usage(self.num_widget_index),
+            "gpu_temp." => indexed_text_or_first(self.num_widget_index, monitor::gpu_temperature),
+            "disk_usage" => indexed_text_or_first(self.num_widget_index, monitor::disk_usage),
             _ => None,
         };
         text.unwrap_or_default()
